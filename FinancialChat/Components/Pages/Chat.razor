@@ -1,0 +1,295 @@
+@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject CodexService Codex
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="chat-container">
+
+    <!-- Header -->
+    <header class="chat-header">
+        <div class="header-left">
+            <span class="logo">📊</span>
+            <div>
+                <h1>Asistente Financiero</h1>
+                <span class="status @StatusClass">● @StatusText</span>
+            </div>
+        </div>
+        <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">↺ Nueva conversación</button>
+    </header>
+
+    <!-- Auth error — pantalla bloqueante si Codex no está logueado -->
+    @if (!string.IsNullOrEmpty(Codex.AuthError))
+    {
+        <div class="auth-error">
+            <span class="auth-icon">🔐</span>
+            <h2>Codex no está autenticado</h2>
+            <p>Ejecutá este comando en el servidor y reiniciá la aplicación:</p>
+            <code>codex login</code>
+        </div>
+    }
+    else
+    {
+        <!-- Mensajes -->
+        <main class="chat-messages" id="messagesContainer">
+            @if (!Messages.Any())
+            {
+                <div class="empty-state">
+                    <p class="empty-icon">💬</p>
+                    <p class="empty-title">¿En qué puedo ayudarte hoy?</p>
+                    <div class="suggestions">
+                        @foreach (var s in Suggestions)
+                        {
+                            <button class="suggestion-chip" @onclick="() => SendSuggestion(s)">@s</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @foreach (var msg in Messages)
+            {
+                <div class="message @(msg.Role == MessageRole.User ? "message-user" : "message-assistant")">
+                    <div class="message-avatar">
+                        @(msg.Role == MessageRole.User ? "👤" : "🤖")
+                    </div>
+                    <div class="message-bubble">
+                        @if (msg.Role == MessageRole.Assistant)
+                        {
+                            <div class="message-content markdown">@((MarkupString)FormatMarkdown(msg.Content))</div>
+                        }
+                        else
+                        {
+                            <div class="message-content">@msg.Content</div>
+                        }
+                        @if (msg.IsStreaming)
+                        {
+                            <span class="cursor-blink">▌</span>
+                        }
+                        <span class="message-time">@msg.Timestamp.ToString("HH:mm")</span>
+                    </div>
+                </div>
+            }
+
+            @if (IsThinking)
+            {
+                <div class="message message-assistant">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-bubble">
+                        <div class="typing-indicator"><span></span><span></span><span></span></div>
+                    </div>
+                </div>
+            }
+        </main>
+
+        <!-- Input -->
+        <footer class="chat-input-area">
+            @if (!string.IsNullOrEmpty(ErrorMessage))
+            {
+                <div class="error-bar">
+                    ⚠ @ErrorMessage
+                    <button @onclick="() => ErrorMessage = string.Empty">✕</button>
+                </div>
+            }
+            <div class="input-row">
+                <textarea
+                    @bind="UserInput"
+                    @bind:event="oninput"
+                    @onkeydown="HandleKeyDown"
+                    placeholder="Hacé tu pregunta financiera..."
+                    rows="1"
+                    disabled="@IsSending"
+                    class="chat-textarea" />
+                <button
+                    class="btn-send @(IsSending ? "sending" : "")"
+                    @onclick="SendMessage"
+                    disabled="@(IsSending || string.IsNullOrWhiteSpace(UserInput))">
+                    @(IsSending ? "⏳" : "➤")
+                </button>
+            </div>
+            <p class="input-hint">Enter para enviar · Shift+Enter para nueva línea</p>
+        </footer>
+    }
+</div>
+
+@code {
+    private List<ChatMessage> Messages { get; set; } = new();
+    private string UserInput    { get; set; } = string.Empty;
+    private bool IsSending      { get; set; } = false;
+    private bool IsThinking     { get; set; } = false;
+    private bool IsReady        { get; set; } = false;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private ChatMessage? _streamingMessage;
+
+    private string StatusClass => IsReady ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
+    private string StatusText  => IsReady ? "Conectado" : (string.IsNullOrEmpty(Codex.AuthError) ? "Conectando..." : "Sin autenticación");
+
+    private readonly string[] Suggestions =
+    [
+        "¿Cuál fue el margen neto del último trimestre?",
+        "Comparar ingresos Q1 vs Q2 de este año",
+        "¿Cuáles son los 5 gastos más altos del mes?",
+        "Mostrar evolución de ventas de los últimos 12 meses"
+    ];
+
+    protected override void OnInitialized()
+    {
+        Codex.OnTokenReceived    += HandleTokenReceived;
+        Codex.OnResponseComplete += HandleResponseComplete;
+        Codex.OnError            += HandleError;
+        Codex.OnReady            += HandleReady;
+    }
+
+    private async Task HandleReady()
+    {
+        IsReady = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleTokenReceived(string token)
+    {
+        IsThinking = false;
+        if (_streamingMessage is null)
+        {
+            _streamingMessage = ChatMessage.FromAssistant(isStreaming: true);
+            Messages.Add(_streamingMessage);
+        }
+        _streamingMessage.Content += token;
+        await InvokeAsync(StateHasChanged);
+        await ScrollToBottomAsync();
+    }
+
+    private async Task HandleResponseComplete()
+    {
+        if (_streamingMessage is not null)
+            _streamingMessage.IsStreaming = false;
+        _streamingMessage = null;
+        IsSending  = false;
+        IsThinking = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleError(string error)
+    {
+        ErrorMessage      = error;
+        IsSending         = false;
+        IsThinking        = false;
+        IsReady           = false;
+        _streamingMessage = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendMessage()
+    {
+        var text = UserInput.Trim();
+        if (string.IsNullOrEmpty(text) || IsSending) return;
+
+        UserInput    = string.Empty;
+        IsSending    = true;
+        IsThinking   = true;
+        ErrorMessage = string.Empty;
+
+        Messages.Add(ChatMessage.FromUser(text));
+        StateHasChanged();
+        await ScrollToBottomAsync();
+        await Codex.SendMessageAsync(text);
+    }
+
+    private async Task SendSuggestion(string text)
+    {
+        UserInput = text;
+        await SendMessage();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendMessage();
+    }
+
+    private void ClearChat()
+    {
+        Messages.Clear();
+        _streamingMessage = null;
+        IsSending  = false;
+        IsThinking = false;
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task ScrollToBottomAsync()
+    {
+        try { await JS.InvokeVoidAsync("scrollToBottom", "messagesContainer"); }
+        catch { /* ignora errores de JS durante prerender */ }
+    }
+
+    // ── Markdown básico ───────────────────────────────────────────────────────
+    private static string FormatMarkdown(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"```(\w*)\n?([\s\S]*?)```",
+            m => $"<pre><code class=\"language-{m.Groups[1].Value}\">{System.Web.HttpUtility.HtmlEncode(m.Groups[2].Value.Trim())}</code></pre>");
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"`([^`]+)`",
+            m => $"<code>{System.Web.HttpUtility.HtmlEncode(m.Groups[1].Value)}</code>");
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"\*(.+?)\*", "<em>$1</em>");
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"(\|.+\|\n?)+", m => ConvertTable(m.Value));
+
+        text = text.Replace("\n", "<br/>");
+        return text;
+    }
+
+    private static string ConvertTable(string raw)
+    {
+        var lines = raw.Trim().Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+        if (lines.Count < 2) return raw;
+        var sb = new System.Text.StringBuilder("<table class=\"data-table\">");
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var cells = lines[i].Split('|').Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
+            if (i == 0)
+            {
+                sb.Append("<thead><tr>");
+                cells.ForEach(c => sb.Append($"<th>{c.Trim()}</th>"));
+                sb.Append("</tr></thead><tbody>");
+            }
+            else if (lines[i].Contains("---")) continue;
+            else
+            {
+                sb.Append("<tr>");
+                cells.ForEach(c => sb.Append($"<td>{c.Trim()}</td>"));
+                sb.Append("</tr>");
+            }
+        }
+        sb.Append("</tbody></table>");
+        return sb.ToString();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Codex.OnTokenReceived    -= HandleTokenReceived;
+        Codex.OnResponseComplete -= HandleResponseComplete;
+        Codex.OnError            -= HandleError;
+        Codex.OnReady            -= HandleReady;
+    }
+
+    // En Chat.razor, bloque @code — AGREGAR esto:
+    private bool _codexStarted = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_codexStarted)
+        {
+            _codexStarted = true;
+            await Codex.StartAsync();  // Acá sí hay suscriptores para OnReady
+        }
+    }
+}

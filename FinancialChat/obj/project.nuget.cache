@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "jRu+9+lVBic=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Leonardo\\source\\repos\\FinancialSolution\\FinancialChat\\FinancialChat.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Leonardo\\.nuget\\packages\\system.text.json\\9.0.0\\system.text.json.9.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

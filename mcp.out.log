@@ -1,0 +1,12 @@
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:54751
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\Users\Leonardo\source\repos\FinancialSolution\FinancialMcpServer
+warn: Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionMiddleware[3]
+      Failed to determine the https port for redirect.
+info: FinancialMcpServer.Middleware.TokenAuthMiddleware[0]
+      Request MCP autorizado - token: mi-token*** | path: /mcp
