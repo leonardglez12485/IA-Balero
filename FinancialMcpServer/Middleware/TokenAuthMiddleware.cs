@@ -1,7 +1,7 @@
 namespace FinancialMcpServer.Middleware;
 
 /// <summary>
-/// Valida el Bearer token en cada request al endpoint /mcp.
+/// Valida el Bearer token en cada request a los endpoints protegidos.
 /// Si el token no está en la lista de appsettings, devuelve 401.
 /// </summary>
 public class TokenAuthMiddleware(RequestDelegate next, IConfiguration config, ILogger<TokenAuthMiddleware> logger)
@@ -13,8 +13,7 @@ public class TokenAuthMiddleware(RequestDelegate next, IConfiguration config, IL
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Solo protegemos el endpoint MCP
-        if (context.Request.Path.StartsWithSegments("/mcp"))
+        if (IsProtectedPath(context.Request.Path))
         {
             context.Request.Headers.TryGetValue("Authorization", out var authValues);
             var authHeader = authValues.FirstOrDefault();
@@ -38,5 +37,11 @@ public class TokenAuthMiddleware(RequestDelegate next, IConfiguration config, IL
         }
 
         await next(context);
+    }
+
+    private static bool IsProtectedPath(PathString path)
+    {
+        return path.StartsWithSegments("/mcp")
+            || path.StartsWithSegments("/context");
     }
 }

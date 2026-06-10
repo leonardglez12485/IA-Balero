@@ -1,11 +1,13 @@
 using FinancialMcpServer.Data;
 using FinancialMcpServer.Middleware;
+using FinancialMcpServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddSingleton<DatabaseFactory>();
+builder.Services.AddSingleton<ZafiroContextService>();
 
 builder.Services.AddMcpServer(options =>
     {
@@ -33,6 +35,13 @@ if (!app.Environment.IsDevelopment())
 app.UseMiddleware<TokenAuthMiddleware>();
 
 app.MapGet("/", () => Results.Ok("Financial MCP Server OK"));
+app.MapPost("/context/resolve", (ZafiroContextRequest request, ZafiroContextService contextService) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Question))
+        return Results.BadRequest(new { error = "La pregunta no puede estar vacia." });
+
+    return Results.Ok(contextService.Resolve(request.Question));
+});
 app.MapMcp("/mcp");
 
 app.Run();

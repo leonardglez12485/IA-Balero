@@ -11,12 +11,13 @@ public class CodexService : IAsyncDisposable
 
     private readonly IConfiguration _config;
     private readonly ILogger<CodexService> _logger;
+    private readonly IWebHostEnvironment _env;
+    private readonly McpContextClient _mcpContextClient;
     private string _selectedModel;
 
     private Process? _codexProcess;
     private int _requestId = 1;
     private string? _currentThreadId;
-    private bool _systemPromptSent = false;
 
     // FIX BUG #1: flag para no iniciar dos veces (varios usuarios en Singleton)
     private bool _isStarting = false;
@@ -28,18 +29,23 @@ public class CodexService : IAsyncDisposable
     public string McpStatus { get; private set; } = "No inicializado";
     public IReadOnlyList<string> AvailableModels { get; }
     public string CurrentModel => _selectedModel;
+    public CodexUsageSnapshot Usage { get; private set; } = CodexUsageSnapshot.Empty(DefaultModels[0]);
 
     public event Func<string, Task>? OnTokenReceived;
     public event Func<Task>? OnResponseComplete;
     public event Func<string, Task>? OnError;
     public event Func<Task>? OnReady;
+    public event Func<CodexUsageSnapshot, Task>? OnUsageUpdated;
 
-    public CodexService(IConfiguration config, ILogger<CodexService> logger)
+    public CodexService(IConfiguration config, ILogger<CodexService> logger, IWebHostEnvironment env, McpContextClient mcpContextClient)
     {
         _config = config;
         _logger = logger;
+        _env = env;
+        _mcpContextClient = mcpContextClient;
         AvailableModels = LoadAvailableModels();
         _selectedModel = NormalizeModel(_config["Codex:Model"]);
+        Usage = CodexUsageSnapshot.Empty(_selectedModel);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -75,13 +81,17 @@ public class CodexService : IAsyncDisposable
     // ─────────────────────────────────────────────────────────────
     private async Task<bool> CheckAuthAsync()
     {
-        if (string.IsNullOrWhiteSpace(GetOpenAiApiKey()))
+        var apiKey = GetOpenAiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             AuthError = "API key de OpenAI no configurada. Definila en FinancialChat/config.json.";
             _logger.LogWarning("OPENAI API key no configurada. Configurar Codex:ApiKey en FinancialChat/config.json.");
             if (OnError is not null) await OnError.Invoke(AuthError);
             return false;
         }
+
+        if (!await EnsureApiKeyLoginAsync(apiKey))
+            return false;
 
         AuthError = string.Empty;
         IsAuthed = true;
@@ -188,12 +198,20 @@ public class CodexService : IAsyncDisposable
                 await Task.Delay(200, cts.Token).ContinueWith(_ => { });
         }
 
+        if (string.IsNullOrWhiteSpace(_currentThreadId))
+        {
+            var message = "Codex no tiene un thread activo. Reiniciá la conversación para reconectar el MCP financiero.";
+            _logger.LogWarning(message);
+            if (OnError is not null) await OnError.Invoke(message);
+            return;
+        }
+
         await SendRpcAsync("turn/start", new
         {
             threadId = _currentThreadId,
             input = new[]
             {
-                new { type = "text", text = BuildUserInput(userMessage) }
+                new { type = "text", text = await BuildUserInputAsync(userMessage) }
             }
         });
     }
@@ -208,14 +226,14 @@ public class CodexService : IAsyncDisposable
         await RestartAsync();
     }
 
-    private string BuildUserInput(string userMessage)
+    private async Task<string> BuildUserInputAsync(string userMessage)
     {
         var sysPrompt = _config["Codex:SystemPrompt"];
-        if (_systemPromptSent || string.IsNullOrWhiteSpace(sysPrompt))
-            return userMessage;
+        var knowledge = await _mcpContextClient.ResolveContextAsync(userMessage);
+        if (string.IsNullOrWhiteSpace(sysPrompt))
+            return $"{knowledge}\n\nPregunta del usuario:\n{userMessage}";
 
-        _systemPromptSent = true;
-        return $"{sysPrompt}\n\nPregunta del usuario:\n{userMessage}";
+        return $"{sysPrompt}\n\n{knowledge}\n\nInstrucción obligatoria para esta pregunta: si requiere datos reales de ventas, stock, compras, finanzas o cualquier información de base de datos, primero usá las herramientas MCP disponibles (ObtenerEsquemaBaseDatos y EjecutarConsultaSelect). No respondas que no tenés acceso a la base si el MCP financiero está conectado; consultá la base y respondé con los datos obtenidos.\n\nPregunta del usuario:\n{userMessage}";
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -296,11 +314,14 @@ public class CodexService : IAsyncDisposable
                         await OnResponseComplete.Invoke();
                     break;
 
+                case "thread/tokenUsage/updated":
+                    await HandleTokenUsageUpdatedAsync(param);
+                    break;
+
                 case "item/completed":
                 case "item/started":
                 case "thread/started":
                 case "thread/status/changed":
-                case "thread/tokenUsage/updated":
                 case "account/rateLimits/updated":
                 case "mcpServer/startupStatus/updated":
                 case "remoteControl/status/changed":
@@ -350,6 +371,7 @@ public class CodexService : IAsyncDisposable
         AddConfigOverride(startInfo, $"model={ToTomlString(_selectedModel)}");
         AddConfigOverride(startInfo, "model_provider=\"openai\"");
         AddConfigOverride(startInfo, "forced_login_method=\"api\"");
+        AddConfigOverride(startInfo, "cli_auth_credentials_store=\"file\"");
 
         var token = _config["Codex:McpToken"];
         if (!string.IsNullOrWhiteSpace(token))
@@ -432,6 +454,122 @@ public class CodexService : IAsyncDisposable
         startInfo.ArgumentList.Add(value);
     }
 
+    private async Task HandleTokenUsageUpdatedAsync(JsonNode? param)
+    {
+        var inputTokens = ReadLong(param, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+        var cachedInputTokens = ReadLong(param, "cached_input_tokens", "cachedInputTokens", "cached_tokens", "cachedTokens");
+        var outputTokens = ReadLong(param, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+        var reasoningOutputTokens = ReadLong(param, "reasoning_output_tokens", "reasoningOutputTokens");
+        var totalTokens = ReadLong(param, "total_tokens", "totalTokens");
+
+        if (totalTokens <= 0)
+            totalTokens = inputTokens + outputTokens + reasoningOutputTokens;
+
+        Usage = new CodexUsageSnapshot(
+            _selectedModel,
+            inputTokens,
+            cachedInputTokens,
+            outputTokens,
+            reasoningOutputTokens,
+            totalTokens,
+            EstimateCost(_selectedModel, inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens));
+
+        if (OnUsageUpdated is not null)
+            await OnUsageUpdated.Invoke(Usage);
+    }
+
+    private decimal EstimateCost(string model, long inputTokens, long cachedInputTokens, long outputTokens, long reasoningOutputTokens)
+    {
+        var cost = GetModelCost(model);
+        var cached = Math.Max(0, Math.Min(cachedInputTokens, inputTokens));
+        var uncachedInput = Math.Max(0, inputTokens - cached);
+        var billableOutput = Math.Max(0, outputTokens + reasoningOutputTokens);
+
+        return (uncachedInput / 1_000_000m * cost.InputPerMillion)
+             + (cached / 1_000_000m * cost.CachedInputPerMillion)
+             + (billableOutput / 1_000_000m * cost.OutputPerMillion);
+    }
+
+    private ModelCost GetModelCost(string model)
+    {
+        var section = _config.GetSection($"Codex:ModelCosts:{model}");
+        return new ModelCost(
+            section.GetValue<decimal?>("InputPerMillion") ?? 0m,
+            section.GetValue<decimal?>("CachedInputPerMillion") ?? 0m,
+            section.GetValue<decimal?>("OutputPerMillion") ?? 0m);
+    }
+
+    private static long ReadLong(JsonNode? node, params string[] names)
+    {
+        if (node is null)
+            return 0;
+
+        if (node is JsonObject obj)
+        {
+            foreach (var (key, value) in obj)
+            {
+                if (names.Contains(key, StringComparer.OrdinalIgnoreCase) && TryGetLong(value, out var found))
+                    return found;
+            }
+
+            foreach (var (_, value) in obj)
+            {
+                var nested = ReadLong(value, names);
+                if (nested > 0)
+                    return nested;
+            }
+        }
+
+        if (node is JsonArray arr)
+        {
+            foreach (var child in arr)
+            {
+                var nested = ReadLong(child, names);
+                if (nested > 0)
+                    return nested;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool TryGetLong(JsonNode? node, out long value)
+    {
+        value = 0;
+        if (node is null)
+            return false;
+
+        try
+        {
+            if (node is JsonValue jsonValue)
+            {
+                if (jsonValue.TryGetValue<long>(out value))
+                    return true;
+
+                if (jsonValue.TryGetValue<int>(out var intValue))
+                {
+                    value = intValue;
+                    return true;
+                }
+
+                if (jsonValue.TryGetValue<decimal>(out var decimalValue))
+                {
+                    value = (long)decimalValue;
+                    return true;
+                }
+
+                if (jsonValue.TryGetValue<string>(out var stringValue) && long.TryParse(stringValue, out value))
+                    return true;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
     private string GetMcpServerName() => _config["Codex:McpServerName"] ?? "financial";
 
     private void ConfigureOpenAiAuthentication(ProcessStartInfo startInfo)
@@ -440,6 +578,7 @@ public class CodexService : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(apiKey))
             return;
 
+        startInfo.Environment["CODEX_HOME"] = GetCodexHome();
         startInfo.Environment["OPENAI_API_KEY"] = apiKey;
         startInfo.Environment["CODEX_API_KEY"] = apiKey;
     }
@@ -448,6 +587,76 @@ public class CodexService : IAsyncDisposable
     {
         var fromConfig = _config["Codex:ApiKey"];
         return string.IsNullOrWhiteSpace(fromConfig) ? null : fromConfig;
+    }
+
+    private async Task<bool> EnsureApiKeyLoginAsync(string apiKey)
+    {
+        var execPath = _config["Codex:ExecutablePath"] ?? "codex";
+        var codexHome = GetCodexHome();
+        Directory.CreateDirectory(codexHome);
+
+        try
+        {
+            var result = await RunCodexAsync(execPath, ["login", "--with-api-key", "-c", "forced_login_method=\"api\"", "-c", "cli_auth_credentials_store=\"file\""], apiKey);
+            if (result.ExitCode == 0)
+                return true;
+
+            AuthError = "No se pudo autenticar Codex con la API key configurada.";
+            _logger.LogWarning("Falló codex login --with-api-key. ExitCode={ExitCode} Stderr={Stderr}", result.ExitCode, result.Stderr.Trim());
+            if (OnError is not null) await OnError.Invoke(AuthError);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            AuthError = $"No se pudo ejecutar Codex para login API key. Verificá Codex:ExecutablePath. Error: {ex.Message}";
+            _logger.LogError(ex, "Error ejecutando codex login --with-api-key");
+            if (OnError is not null) await OnError.Invoke(AuthError);
+            return false;
+        }
+    }
+
+    private string GetCodexHome()
+    {
+        var configured = _config["Codex:CodexHome"];
+        var path = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(_env.ContentRootPath, ".codex-backend")
+            : configured;
+
+        return Path.IsPathRooted(path)
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(Path.Combine(_env.ContentRootPath, path));
+    }
+
+    private async Task<(int ExitCode, string Stdout, string Stderr)> RunCodexAsync(string execPath, string[] args, string stdin)
+    {
+        using var proc = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = execPath,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            }
+        };
+
+        proc.StartInfo.Environment["CODEX_HOME"] = GetCodexHome();
+        foreach (var arg in args)
+            proc.StartInfo.ArgumentList.Add(arg);
+
+        proc.Start();
+        await proc.StandardInput.WriteLineAsync(stdin);
+        proc.StandardInput.Close();
+
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        await proc.WaitForExitAsync();
+
+        return (proc.ExitCode, await stdoutTask, await stderrTask);
     }
 
     private IReadOnlyList<string> LoadAvailableModels()
@@ -574,7 +783,9 @@ public class CodexService : IAsyncDisposable
         await StopProcessAsync();
         _requestId = 1;
         _currentThreadId = null;
-        _systemPromptSent = false;
+        Usage = CodexUsageSnapshot.Empty(_selectedModel);
+        if (OnUsageUpdated is not null)
+            await OnUsageUpdated.Invoke(Usage);
         _isStarted = false;
         _isStarting = false;
         McpStatus = "No inicializado";
@@ -592,3 +803,20 @@ public class CodexService : IAsyncDisposable
         _codexProcess = null;
     }
 }
+
+public sealed record CodexUsageSnapshot(
+    string Model,
+    long InputTokens,
+    long CachedInputTokens,
+    long OutputTokens,
+    long ReasoningOutputTokens,
+    long TotalTokens,
+    decimal EstimatedCost)
+{
+    public static CodexUsageSnapshot Empty(string model) => new(model, 0, 0, 0, 0, 0, 0m);
+}
+
+public sealed record ModelCost(
+    decimal InputPerMillion,
+    decimal CachedInputPerMillion,
+    decimal OutputPerMillion);

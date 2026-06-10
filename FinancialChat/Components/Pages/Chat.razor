@@ -1,15 +1,15 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Globalization
 @inject CodexService Codex
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <div class="chat-container">
 
-    <!-- Header -->
     <header class="chat-header">
         <div class="header-left">
-            <span class="logo">📊</span>
+            <img src="logo.svg" class="logo" alt="Logo" aria-hidden="true" />
             <div>
                 <h1>Asistente Financiero</h1>
                 <span class="status @StatusClass">● @StatusText</span>
@@ -25,15 +25,46 @@
                     }
                 </select>
             </label>
-            <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">↺ Nueva conversación</button>
+            <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">Nueva</button>
         </div>
     </header>
 
-    <!-- Auth error — pantalla bloqueante si no hay API key -->
+    <aside class="usage-panel" aria-label="Entorno de ejecución">
+        <div class="usage-header">
+            <span>Entorno</span>
+            <span class="usage-gear" aria-hidden="true">⚙</span>
+        </div>
+        <div class="usage-row usage-row-main">
+            <span class="usage-icon">⚡</span>
+            <span class="usage-label">Tokens</span>
+            <strong class="usage-value">@FormatNumber(_usage.TotalTokens)</strong>
+        </div>
+        <div class="usage-row">
+            <span class="usage-icon">⊙</span>
+            <span class="usage-label">Modelo</span>
+            <strong class="usage-value">@SelectedModel</strong>
+        </div>
+        <div class="usage-row">
+            <span class="usage-icon">◈</span>
+            <span class="usage-label">Consumo</span>
+            <strong class="usage-value usage-cost">@FormatMoney(_usage.EstimatedCost)</strong>
+        </div>
+        <div class="usage-divider"></div>
+        <div class="usage-section-title">Tokens</div>
+        <div class="usage-row usage-row-small">
+            <span class="usage-label">Entrada</span>
+            <strong class="usage-value">@FormatNumber(_usage.InputTokens)</strong>
+        </div>
+        <div class="usage-row usage-row-small">
+            <span class="usage-label">Salida</span>
+            <strong class="usage-value">@FormatNumber(_usage.OutputTokens + _usage.ReasoningOutputTokens)</strong>
+        </div>
+    </aside>
+
     @if (!string.IsNullOrEmpty(Codex.AuthError))
     {
         <div class="auth-error">
-            <span class="auth-icon">🔐</span>
+            <span class="auth-icon">!</span>
             <h2>OpenAI API key no configurada</h2>
             <p>Definila en el archivo de configuración del backend y reiniciá la aplicación:</p>
             <code>FinancialChat/config.json</code>
@@ -41,13 +72,12 @@
     }
     else
     {
-        <!-- Mensajes -->
         <main class="chat-messages" id="messagesContainer">
             @if (!Messages.Any())
             {
                 <div class="empty-state">
-                    <p class="empty-icon">💬</p>
-                    <p class="empty-title">¿En qué puedo ayudarte hoy?</p>
+                    <div class="empty-mark" aria-hidden="true"></div>
+                    <p class="empty-title">Preguntame sobre tus datos financieros.</p>
                     <div class="suggestions">
                         @foreach (var s in Suggestions)
                         {
@@ -60,9 +90,6 @@
             @foreach (var msg in Messages)
             {
                 <div class="message @(msg.Role == MessageRole.User ? "message-user" : "message-assistant")">
-                    <div class="message-avatar">
-                        @(msg.Role == MessageRole.User ? "👤" : "🤖")
-                    </div>
                     <div class="message-bubble">
                         @if (msg.Role == MessageRole.Assistant)
                         {
@@ -84,7 +111,6 @@
             @if (IsThinking)
             {
                 <div class="message message-assistant">
-                    <div class="message-avatar">🤖</div>
                     <div class="message-bubble">
                         <div class="typing-indicator"><span></span><span></span><span></span></div>
                     </div>
@@ -97,8 +123,8 @@
             @if (!string.IsNullOrEmpty(ErrorMessage))
             {
                 <div class="error-bar">
-                    ⚠ @ErrorMessage
-                    <button @onclick="() => ErrorMessage = string.Empty">✕</button>
+                    <span>@ErrorMessage</span>
+                    <button @onclick="() => ErrorMessage = string.Empty">Cerrar</button>
                 </div>
             }
             <div class="input-row">
@@ -114,7 +140,7 @@
                     class="btn-send @(IsSending ? "sending" : "")"
                     @onclick="SendMessage"
                     disabled="@(IsSending || string.IsNullOrWhiteSpace(UserInput))">
-                    @(IsSending ? "⏳" : "➤")
+                    @(IsSending ? "..." : "↑")
                 </button>
             </div>
             <p class="input-hint">Enter para enviar · Shift+Enter para nueva línea</p>
@@ -131,6 +157,7 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private string SelectedModel { get; set; } = string.Empty;
     private ChatMessage? _streamingMessage;
+    private CodexUsageSnapshot _usage = CodexUsageSnapshot.Empty(string.Empty);
 
     private string StatusClass => IsReady ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
     private string StatusText  => IsReady ? "Conectado" : (string.IsNullOrEmpty(Codex.AuthError) ? "Conectando..." : "Sin autenticación");
@@ -149,12 +176,21 @@
         Codex.OnResponseComplete += HandleResponseComplete;
         Codex.OnError            += HandleError;
         Codex.OnReady            += HandleReady;
+        Codex.OnUsageUpdated     += HandleUsageUpdated;
         SelectedModel = Codex.CurrentModel;
+        _usage = Codex.Usage;
     }
 
     private async Task HandleReady()
     {
         IsReady = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleUsageUpdated(CodexUsageSnapshot usage)
+    {
+        _usage = usage;
+        SelectedModel = usage.Model;
         await InvokeAsync(StateHasChanged);
     }
 
@@ -241,6 +277,7 @@
         IsThinking = true;
         ErrorMessage = string.Empty;
         await Codex.ChangeModelAsync(model);
+        _usage = Codex.Usage;
         IsSending = false;
         IsThinking = false;
     }
@@ -303,12 +340,23 @@
         return sb.ToString();
     }
 
+    private static string FormatNumber(long value)
+    {
+        return value.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatMoney(decimal value)
+    {
+        return value.ToString("$0.0000", CultureInfo.InvariantCulture);
+    }
+
     public async ValueTask DisposeAsync()
     {
         Codex.OnTokenReceived    -= HandleTokenReceived;
         Codex.OnResponseComplete -= HandleResponseComplete;
         Codex.OnError            -= HandleError;
         Codex.OnReady            -= HandleReady;
+        Codex.OnUsageUpdated     -= HandleUsageUpdated;
     }
 
     // En Chat.razor, bloque @code — AGREGAR esto:

@@ -96,6 +96,7 @@ ServiceFabricBackup/
 **/secrets.json
 **/config.json
 !**/config.example.json
+**/.codex-backend/
 **/*.pfx
 **/*.key
 **/*.pem

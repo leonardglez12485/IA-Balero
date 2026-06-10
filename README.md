@@ -37,6 +37,7 @@ Configurar `FinancialChat/appsettings.json`:
 ```json
 "Codex": {
   "ExecutablePath": "C:\\Users\\Leonardo\\AppData\\Roaming\\npm\\codex.cmd",
+  "CodexHome": ".codex-backend",
   "Model": "gpt-5.5",
   "AvailableModels": [ "gpt-5.5", "gpt-5.4", "gpt-5.4-mini" ],
   "McpServerName": "financial",
@@ -61,7 +62,8 @@ dotnet run
 Usuario
   -> FinancialChat Blazor
   -> CodexService
-  -> codex app-server con API key de config.json y modelo seleccionado
+  -> codex login --with-api-key en CODEX_HOME aislado
+  -> codex app-server con modelo seleccionado
   -> FinancialMcpServer /mcp
   -> Base de datos readonly
   -> Respuesta streaming al front

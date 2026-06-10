@@ -8,9 +8,12 @@ builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange:
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddHttpClient();
+
 // ── CodexService como Singleton ───────────────────────────────────────────────
 // Singleton porque queremos UNA instancia de codex app-server corriendo
 // Si necesitás una instancia por usuario, cambialo a Scoped y manejá el ciclo de vida
+builder.Services.AddSingleton<McpContextClient>();
 builder.Services.AddSingleton<CodexService>();
 
 // ── Logging ───────────────────────────────────────────────────────────────────

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Logo bombillo IA">
+  <title>Logo bombillo IA</title>
+
+  <!--
+    Vector inspirado en el ícono proporcionado:
+    - Bombillo amarillo con contorno oscuro y borde suave.
+    - Filamento blanco con contorno.
+    - Estrellitas tipo IA alrededor.
+  -->
+
+  <defs>
+    <!-- Un borde exterior suave similar al “sticker” -->
+    <filter id="softOutline" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="dilated" />
+      <feGaussianBlur in="dilated" stdDeviation="2.5" result="blur" />
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.74  0 0 0 0 0.74  0 0 0 0 0.74  0 0 0 0.75 0" result="gray" />
+      <feMerge>
+        <feMergeNode in="gray" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <style>
+      .stroke-dark { stroke: #2f2f2f; }
+      .stroke-mid  { stroke: #6e6e6e; }
+      .fill-yellow { fill: #ffef3a; }
+      .fill-white  { fill: #ffffff; }
+
+      .outline-inner { stroke-width: 16; stroke-linecap: round; stroke-linejoin: round; }
+      .outline-outer { stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }
+
+      .filament-outline { stroke-width: 14; stroke-linecap: round; stroke-linejoin: round; }
+      .filament-fill    { stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+
+      .sparkle { stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+      .dot { stroke: none; }
+    </style>
+  </defs>
+
+  <g filter="url(#softOutline)">
+    <!-- Bombillo: borde externo gris y borde interno oscuro para look “sticker” -->
+    <path id="bulb-shape" class="fill-yellow stroke-mid outline-outer"
+      d="M256 64
+         C168 64 112 135 112 222
+         C112 287 145 335 182 370
+         C201 388 212 410 214 436
+         C214 450 225 462 239 462
+         H273
+         C287 462 298 450 298 436
+         C300 410 311 388 330 370
+         C367 335 400 287 400 222
+         C400 135 344 64 256 64
+         Z"/>
+
+    <path class="fill-yellow stroke-dark outline-inner"
+      d="M256 64
+         C168 64 112 135 112 222
+         C112 287 145 335 182 370
+         C201 388 212 410 214 436
+         C214 450 225 462 239 462
+         H273
+         C287 462 298 450 298 436
+         C300 410 311 388 330 370
+         C367 335 400 287 400 222
+         C400 135 344 64 256 64
+         Z"/>
+
+    <!-- “Base” inferior (ligero aplanado, como en el ícono) -->
+    <path class="fill-yellow stroke-dark outline-inner"
+      d="M220 442
+         C220 430 230 420 242 420
+         H270
+         C282 420 292 430 292 442
+         C292 466 274 484 256 484
+         C238 484 220 466 220 442
+         Z"/>
+
+    <!-- Filamento: contorno oscuro + relleno blanco -->
+    <g>
+      <!-- contorno -->
+      <path class="fill-white stroke-dark filament-outline"
+        d="M248 384
+           C248 352 228 340 206 326
+           C184 312 176 290 188 272
+           C204 248 238 252 248 276
+           C258 252 292 248 308 272
+           C320 290 312 312 290 326
+           C268 340 248 352 248 384
+           Z"/>
+
+      <!-- tallo -->
+      <path class="fill-white stroke-dark filament-outline"
+        d="M248 384
+           C248 402 248 418 248 436
+           C248 446 256 454 266 454
+           H246
+           C236 454 228 446 228 436
+           C228 418 228 402 228 384
+           Z"/>
+
+      <!-- detalles internos (blanco sobre blanco con trazo oscuro muy leve) -->
+      <path class="stroke-dark filament-fill" fill="none" opacity="0.0"
+        d="M206 326 C225 340 248 352 248 384"/>
+    </g>
+
+    <!-- Estrellitas IA (sparkles) -->
+    <g aria-hidden="true">
+      <!-- estrella 1: arriba derecha -->
+      <path class="fill-white stroke-dark sparkle"
+        d="M392 108
+           L404 136
+           L432 148
+           L404 160
+           L392 188
+           L380 160
+           L352 148
+           L380 136
+           Z"/>
+
+      <!-- estrella 2: arriba izquierda (más pequeña) -->
+      <path class="fill-white stroke-dark sparkle" transform="translate(0,0) scale(0.75) translate(84,74)"
+        d="M160 108
+           L172 136
+           L200 148
+           L172 160
+           L160 188
+           L148 160
+           L120 148
+           L148 136
+           Z"/>
+
+      <!-- estrella 3: lateral derecha (mini) -->
+      <path class="fill-white stroke-dark sparkle" transform="translate(0,0) scale(0.55) translate(520,330)"
+        d="M160 108
+           L172 136
+           L200 148
+           L172 160
+           L160 188
+           L148 160
+           L120 148
+           L148 136
+           Z"/>
+
+      <!-- puntitos -->
+      <circle class="fill-white stroke-dark" cx="350" cy="210" r="10" stroke-width="8" />
+      <circle class="fill-white stroke-dark" cx="160" cy="170" r="8" stroke-width="7" />
+      <circle class="fill-white stroke-dark" cx="418" cy="230" r="7" stroke-width="6" />
+    </g>
+  </g>
+</svg>
