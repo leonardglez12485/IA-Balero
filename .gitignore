@@ -94,6 +94,8 @@ ServiceFabricBackup/
 **/appsettings.Production.json
 **/appsettings.Secrets.json
 **/secrets.json
+**/config.json
+!**/config.example.json
 **/*.pfx
 **/*.key
 **/*.pem
@@ -119,4 +121,5 @@ TestResults/
 # Temp files
 *.tmp
 *.temp
+*.log
 ~$*

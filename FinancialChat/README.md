@@ -26,7 +26,7 @@ Base de datos del cliente (PostgreSQL / MySQL / SQL Server)
 - .NET 9 SDK
 - Node.js (para instalar Codex CLI)
 - Codex CLI instalado: `npm install -g @openai/codex`
-- Codex logueado: `codex login`
+- API key configurada en `FinancialChat/config.json`
 - **FinancialMcpServer** corriendo (ver su README)
 
 ---

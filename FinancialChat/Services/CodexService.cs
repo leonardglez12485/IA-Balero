@@ -7,8 +7,11 @@ namespace FinancialChat.Services;
 
 public class CodexService : IAsyncDisposable
 {
+    private static readonly string[] DefaultModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
+
     private readonly IConfiguration _config;
     private readonly ILogger<CodexService> _logger;
+    private string _selectedModel;
 
     private Process? _codexProcess;
     private int _requestId = 1;
@@ -23,6 +26,8 @@ public class CodexService : IAsyncDisposable
     public bool IsAuthed { get; private set; }
     public string AuthError { get; private set; } = string.Empty;
     public string McpStatus { get; private set; } = "No inicializado";
+    public IReadOnlyList<string> AvailableModels { get; }
+    public string CurrentModel => _selectedModel;
 
     public event Func<string, Task>? OnTokenReceived;
     public event Func<Task>? OnResponseComplete;
@@ -33,6 +38,8 @@ public class CodexService : IAsyncDisposable
     {
         _config = config;
         _logger = logger;
+        AvailableModels = LoadAvailableModels();
+        _selectedModel = NormalizeModel(_config["Codex:Model"]);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -68,53 +75,17 @@ public class CodexService : IAsyncDisposable
     // ─────────────────────────────────────────────────────────────
     private async Task<bool> CheckAuthAsync()
     {
-        var execPath = _config["Codex:ExecutablePath"] ?? "codex";
-        var proc = new Process
+        if (string.IsNullOrWhiteSpace(GetOpenAiApiKey()))
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = execPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            }
-        };
-        proc.StartInfo.ArgumentList.Add("login");
-        proc.StartInfo.ArgumentList.Add("status");
-
-        try
-        {
-            proc.Start();
-        }
-        catch (Exception ex)
-        {
-            AuthError = $"No se pudo ejecutar Codex en '{execPath}'. Verificá el ExecutablePath. Error: {ex.Message}";
-            _logger.LogError(AuthError);
+            AuthError = "API key de OpenAI no configurada. Definila en FinancialChat/config.json.";
+            _logger.LogWarning("OPENAI API key no configurada. Configurar Codex:ApiKey en FinancialChat/config.json.");
             if (OnError is not null) await OnError.Invoke(AuthError);
             return false;
         }
 
-        var output = await proc.StandardOutput.ReadToEndAsync();
-        var stderr = await proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync();
-
-        // FIX: en Windows codex.cmd puede devolver exit code != 0 pero igual está autenticado
-        // Verificar también por el contenido del output
-        IsAuthed = proc.ExitCode == 0
-                   || output.Contains("Authenticated", StringComparison.OrdinalIgnoreCase)
-                   || output.Contains("logged in", StringComparison.OrdinalIgnoreCase);
-
-        if (!IsAuthed)
-        {
-            AuthError = "Codex no está autenticado. Ejecutá 'codex login' en el servidor.";
-            _logger.LogWarning("Auth falló. ExitCode={Code} Output={Out} Stderr={Err}",
-                proc.ExitCode, output.Trim(), stderr.Trim());
-            if (OnError is not null) await OnError.Invoke(AuthError);
-        }
-        else
-        {
-            _logger.LogInformation("Codex autenticado ✓");
-        }
+        AuthError = string.Empty;
+        IsAuthed = true;
+        _logger.LogInformation("Codex configurado con autenticación por API key y modelo {Model}", _selectedModel);
         return IsAuthed;
     }
 
@@ -137,6 +108,7 @@ public class CodexService : IAsyncDisposable
         };
 
         ConfigureAppServerArguments(startInfo);
+        ConfigureOpenAiAuthentication(startInfo);
 
         _codexProcess = new Process
         {
@@ -181,7 +153,8 @@ public class CodexService : IAsyncDisposable
         // thread/start — esperamos respuesta real
         var threadResp = await SendRpcAndWaitAsync("thread/start", new
         {
-            cwd = workingDir
+            cwd = workingDir,
+            model = _selectedModel
         }, timeoutMs: 15_000);
 
         if (threadResp is not null)
@@ -223,6 +196,16 @@ public class CodexService : IAsyncDisposable
                 new { type = "text", text = BuildUserInput(userMessage) }
             }
         });
+    }
+
+    public async Task ChangeModelAsync(string model)
+    {
+        var normalized = NormalizeModel(model);
+        if (string.Equals(_selectedModel, normalized, StringComparison.Ordinal))
+            return;
+
+        _selectedModel = normalized;
+        await RestartAsync();
     }
 
     private string BuildUserInput(string userMessage)
@@ -364,6 +347,9 @@ public class CodexService : IAsyncDisposable
         AddConfigOverride(startInfo, $"mcp_servers.{serverName}.enabled=true");
         AddConfigOverride(startInfo, $"mcp_servers.{serverName}.required=true");
         AddConfigOverride(startInfo, $"mcp_servers.{serverName}.default_tools_approval_mode=\"approve\"");
+        AddConfigOverride(startInfo, $"model={ToTomlString(_selectedModel)}");
+        AddConfigOverride(startInfo, "model_provider=\"openai\"");
+        AddConfigOverride(startInfo, "forced_login_method=\"api\"");
 
         var token = _config["Codex:McpToken"];
         if (!string.IsNullOrWhiteSpace(token))
@@ -447,6 +433,41 @@ public class CodexService : IAsyncDisposable
     }
 
     private string GetMcpServerName() => _config["Codex:McpServerName"] ?? "financial";
+
+    private void ConfigureOpenAiAuthentication(ProcessStartInfo startInfo)
+    {
+        var apiKey = GetOpenAiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return;
+
+        startInfo.Environment["OPENAI_API_KEY"] = apiKey;
+        startInfo.Environment["CODEX_API_KEY"] = apiKey;
+    }
+
+    private string? GetOpenAiApiKey()
+    {
+        var fromConfig = _config["Codex:ApiKey"];
+        return string.IsNullOrWhiteSpace(fromConfig) ? null : fromConfig;
+    }
+
+    private IReadOnlyList<string> LoadAvailableModels()
+    {
+        var configured = _config.GetSection("Codex:AvailableModels").Get<string[]>();
+        return configured is { Length: > 0 }
+            ? configured.Where(model => !string.IsNullOrWhiteSpace(model)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : DefaultModels;
+    }
+
+    private string NormalizeModel(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return AvailableModels.FirstOrDefault() ?? DefaultModels[0];
+
+        var trimmed = model.Trim();
+        return AvailableModels.Contains(trimmed, StringComparer.OrdinalIgnoreCase)
+            ? AvailableModels.First(m => string.Equals(m, trimmed, StringComparison.OrdinalIgnoreCase))
+            : trimmed;
+    }
 
     private static string ToTomlString(string value)
     {
@@ -545,11 +566,29 @@ public class CodexService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await StopProcessAsync();
+    }
+
+    private async Task RestartAsync()
+    {
+        await StopProcessAsync();
+        _requestId = 1;
+        _currentThreadId = null;
+        _systemPromptSent = false;
+        _isStarted = false;
+        _isStarting = false;
+        McpStatus = "No inicializado";
+        await StartAsync();
+    }
+
+    private async Task StopProcessAsync()
+    {
         if (_codexProcess is { HasExited: false })
         {
             _codexProcess.Kill();
             await _codexProcess.WaitForExitAsync();
         }
         _codexProcess?.Dispose();
+        _codexProcess = null;
     }
 }

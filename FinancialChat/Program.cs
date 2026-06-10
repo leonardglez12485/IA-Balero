@@ -2,6 +2,8 @@ using FinancialChat.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange: true);
+
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

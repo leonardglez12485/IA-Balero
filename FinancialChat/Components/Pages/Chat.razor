@@ -15,17 +15,28 @@
                 <span class="status @StatusClass">● @StatusText</span>
             </div>
         </div>
-        <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">↺ Nueva conversación</button>
+        <div class="header-actions">
+            <label class="model-selector">
+                <span>Modelo</span>
+                <select value="@SelectedModel" @onchange="HandleModelChanged" disabled="@IsSending">
+                    @foreach (var model in Codex.AvailableModels)
+                    {
+                        <option value="@model">@model</option>
+                    }
+                </select>
+            </label>
+            <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">↺ Nueva conversación</button>
+        </div>
     </header>
 
-    <!-- Auth error — pantalla bloqueante si Codex no está logueado -->
+    <!-- Auth error — pantalla bloqueante si no hay API key -->
     @if (!string.IsNullOrEmpty(Codex.AuthError))
     {
         <div class="auth-error">
             <span class="auth-icon">🔐</span>
-            <h2>Codex no está autenticado</h2>
-            <p>Ejecutá este comando en el servidor y reiniciá la aplicación:</p>
-            <code>codex login</code>
+            <h2>OpenAI API key no configurada</h2>
+            <p>Definila en el archivo de configuración del backend y reiniciá la aplicación:</p>
+            <code>FinancialChat/config.json</code>
         </div>
     }
     else
@@ -118,6 +129,7 @@
     private bool IsThinking     { get; set; } = false;
     private bool IsReady        { get; set; } = false;
     private string ErrorMessage { get; set; } = string.Empty;
+    private string SelectedModel { get; set; } = string.Empty;
     private ChatMessage? _streamingMessage;
 
     private string StatusClass => IsReady ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
@@ -137,6 +149,7 @@
         Codex.OnResponseComplete += HandleResponseComplete;
         Codex.OnError            += HandleError;
         Codex.OnReady            += HandleReady;
+        SelectedModel = Codex.CurrentModel;
     }
 
     private async Task HandleReady()
@@ -213,6 +226,23 @@
         IsSending  = false;
         IsThinking = false;
         ErrorMessage = string.Empty;
+    }
+
+    private async Task HandleModelChanged(ChangeEventArgs e)
+    {
+        var model = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(model) || model == SelectedModel)
+            return;
+
+        SelectedModel = model;
+        ClearChat();
+        IsReady = false;
+        IsSending = true;
+        IsThinking = true;
+        ErrorMessage = string.Empty;
+        await Codex.ChangeModelAsync(model);
+        IsSending = false;
+        IsThinking = false;
     }
 
     private async Task ScrollToBottomAsync()

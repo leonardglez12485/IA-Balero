@@ -1,128 +1,68 @@
-# Financial Solution — .NET 9
+# Financial Solution - .NET 9
 
-Chat financiero con IA que conecta **Blazor Server** → **Codex CLI** → **MCP Server .NET** → **Base de datos**.
-
----
+Chat financiero con IA que conecta **Blazor Server** -> **Codex CLI** -> **MCP Server .NET** -> **Base de datos**.
 
 ## Estructura
 
-```
+```text
 FinancialSolution/
-├── FinancialSolution.sln         ← Abrí esto en Visual Studio
-├── FinancialChat/                ← Frontend Blazor Server
+├── FinancialSolution.sln
+├── FinancialChat/
 │   ├── Components/Pages/Chat.razor
-│   ├── Services/CodexService.cs  ← Habla con codex app-server
-│   └── appsettings.json          ← Configurar URL y token MCP
-└── FinancialMcpServer/           ← Middleware protege credenciales BD
-    ├── Tools/FinancialTools.cs   ← Herramientas financieras para Codex
-    └── appsettings.json          ← Configurar BD y tokens por cliente
+│   ├── Services/CodexService.cs
+│   └── appsettings.json
+└── FinancialMcpServer/
+    ├── Tools/FinancialTools.cs
+    └── appsettings.json
 ```
 
----
+## Setup rápido
 
-## Setup rápido (primera vez)
-
-### Requisitos
+Requisitos:
 - .NET 9 SDK
 - Node.js
 - Codex CLI: `npm install -g @openai/codex`
-- Cuenta ChatGPT Plus / Pro / Business
+- API key de OpenAI configurada en `FinancialChat/config.json`
 
-### Pasos
-
-```bash
-# 1. Login con ChatGPT (una sola vez en el servidor)
-codex login
-
-# 2. Verificar autenticación
-codex login status   # debe decir: Authenticated via ChatGPT
-
-# 3. Configurar el MCP Server
-# Editar FinancialMcpServer/appsettings.json:
-# - Database.ConnectionString → tu base de datos
-# - McpSecurity.ValidTokens  → tokens por cliente
-
-# 4. Levantar el MCP Server (terminal 1)
-cd FinancialMcpServer
-dotnet run
-
-# 5. Configurar el Frontend
-# Editar FinancialChat/appsettings.json:
-# - Codex.McpServerUrl → URL donde corre el MCP Server
-# - Codex.McpToken     → token del cliente (mismo que en paso 3)
-
-# 6. Levantar el Frontend (terminal 2)
-cd FinancialChat
-dotnet run
-
-# 7. Abrir en el browser
-# https://localhost:5001
-```
-
----
-
-## Flujo de una consulta
-
-```
-Usuario escribe pregunta
-    ↓ SignalR (Blazor Server)
-CodexService.SendMessageAsync()
-    ↓ stdin JSON-RPC
-codex app-server
-    ↓ MCP tool call (automático)
-FinancialMcpServer /mcp
-    ↓ SQL readonly
-Base de datos del cliente
-    ↑ datos JSON
-FinancialMcpServer
-    ↑ resultado al tool
-codex app-server — genera respuesta
-    ↑ stdout streaming tokens
-CodexService — eventos OnTokenReceived
-    ↑ SignalR push
-Chat.razor — muestra token a token en UI
-```
-
----
-
-## Configuración de producción
-
-### FinancialMcpServer — `appsettings.json`
-```json
-{
-  "Database": {
-    "Provider": "PostgreSQL",
-    "ConnectionString": "Host=...;Database=...;Username=readonly_user;Password=..."
-  },
-  "McpSecurity": {
-    "ValidTokens": [ "token-cliente-abc" ]
-  }
-}
-```
-
-### FinancialChat — `appsettings.json`
 ```json
 {
   "Codex": {
-    "ExecutablePath": "codex",
-    "McpServerUrl":   "https://tu-dominio.com/mcp",
-    "McpToken":       "token-cliente-abc"
+    "ApiKey": "sk-..."
   }
 }
 ```
 
----
+Configurar `FinancialChat/appsettings.json`:
 
-## Deploy en IIS (Windows Server)
+```json
+"Codex": {
+  "ExecutablePath": "C:\\Users\\Leonardo\\AppData\\Roaming\\npm\\codex.cmd",
+  "Model": "gpt-5.5",
+  "AvailableModels": [ "gpt-5.5", "gpt-5.4", "gpt-5.4-mini" ],
+  "McpServerName": "financial",
+  "McpServerUrl": "http://localhost:54751/mcp",
+  "McpToken": "token-cliente"
+}
+```
 
-```bash
-# MCP Server
+Levantar:
+
+```powershell
 cd FinancialMcpServer
-dotnet publish -c Release -o ./publish
-# Crear site IIS → puerto 8080 (o el que elijas)
+dotnet run
 
-# Frontend
-cd FinancialChat
-dotnet publish -c Release -o ./publish
-# Crear site IIS → puerto 443 con HTTPS
+cd ..\FinancialChat
+dotnet run
+```
+
+## Flujo
+
+```text
+Usuario
+  -> FinancialChat Blazor
+  -> CodexService
+  -> codex app-server con API key de config.json y modelo seleccionado
+  -> FinancialMcpServer /mcp
+  -> Base de datos readonly
+  -> Respuesta streaming al front
 ```

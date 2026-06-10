@@ -1,5 +1,0 @@
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.build.json
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.build.json
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.build.json
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.build.json
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.build.json
