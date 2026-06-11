@@ -68,7 +68,7 @@ public class CodexService : IAsyncDisposable
         try
         {
             if (!await CheckAuthAsync()) return;
-            await LaunchAppServerAsync();
+            //await LaunchAppServerAsync();
             _isStarted = true;
         }
         finally
@@ -669,6 +669,7 @@ public class CodexService : IAsyncDisposable
 
         try
         {
+            return true;
             var result = await RunCodexAsync(execPath, ["login", "--with-api-key", "-c", "forced_login_method=\"api\"", "-c", "cli_auth_credentials_store=\"file\""], apiKey);
             if (result.ExitCode == 0)
                 return true;

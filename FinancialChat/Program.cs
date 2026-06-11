@@ -1,8 +1,14 @@
 using FinancialChat.Services;
+using System.Buffers.Text;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange: true);
+var pathToExe = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
+Directory.SetCurrentDirectory(pathToExe);
+var configfile = pathToExe + Path.DirectorySeparatorChar + "config.json";
+
+builder.Configuration.AddJsonFile(configfile, optional: true, reloadOnChange: true);
 
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
