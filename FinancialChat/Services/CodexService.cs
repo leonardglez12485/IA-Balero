@@ -766,10 +766,9 @@ public class CodexService : IAsyncDisposable
 
         if (statusResp is null)
         {
-            McpStatus = "No se pudo verificar el MCP financiero.";
+            McpStatus = "MCP financiero no verificado; el chat continuará.";
             _logger.LogWarning(McpStatus);
-            if (OnError is not null) await OnError.Invoke(McpStatus);
-            return false;
+            return true;
         }
 
         var json = statusResp.ToJsonString();
@@ -777,19 +776,17 @@ public class CodexService : IAsyncDisposable
 
         if (!json.Contains(serverName, StringComparison.OrdinalIgnoreCase))
         {
-            McpStatus = $"MCP '{serverName}' no aparece configurado en Codex.";
+            McpStatus = $"MCP '{serverName}' no aparece en el estado reportado por Codex; el chat continuará.";
             _logger.LogWarning(McpStatus);
-            if (OnError is not null) await OnError.Invoke(McpStatus);
-            return false;
+            return true;
         }
 
         if (!json.Contains("ObtenerEsquemaBaseDatos", StringComparison.OrdinalIgnoreCase) ||
             !json.Contains("EjecutarConsultaSelect", StringComparison.OrdinalIgnoreCase))
         {
-            McpStatus = $"MCP '{serverName}' conectado, pero no expone las tools financieras esperadas.";
+            McpStatus = $"MCP '{serverName}' conectado; Codex no reporto el detalle de tools financieras, el chat continuará.";
             _logger.LogWarning(McpStatus);
-            if (OnError is not null) await OnError.Invoke(McpStatus);
-            return false;
+            return true;
         }
 
         McpStatus = $"MCP '{serverName}' conectado.";
