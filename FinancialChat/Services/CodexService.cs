@@ -18,6 +18,7 @@ public class CodexService : IAsyncDisposable
     private Process? _codexProcess;
     private int _requestId = 1;
     private string? _currentThreadId;
+    private readonly StringBuilder _assistantResponseBuffer = new();
 
     // FIX BUG #1: flag para no iniciar dos veces (varios usuarios en Singleton)
     private bool _isStarting = false;
@@ -206,6 +207,8 @@ public class CodexService : IAsyncDisposable
             return;
         }
 
+        _assistantResponseBuffer.Clear();
+
         await SendRpcAsync("turn/start", new
         {
             threadId = _currentThreadId,
@@ -233,7 +236,7 @@ public class CodexService : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(sysPrompt))
             return $"{knowledge}\n\nPregunta del usuario:\n{userMessage}";
 
-        return $"{sysPrompt}\n\n{knowledge}\n\nInstrucción obligatoria para esta pregunta: si requiere datos reales de ventas, stock, compras, finanzas o cualquier información de base de datos, primero usá las herramientas MCP disponibles (ObtenerEsquemaBaseDatos y EjecutarConsultaSelect). No respondas que no tenés acceso a la base si el MCP financiero está conectado; consultá la base y respondé con los datos obtenidos.\n\nPregunta del usuario:\n{userMessage}";
+        return $"{sysPrompt}\n\n{knowledge}\n\nInstrucciones obligatorias para esta pregunta:\n- Si requiere datos reales de ventas, stock, compras, finanzas o cualquier información de base de datos, primero usá las herramientas MCP disponibles (ObtenerEsquemaBaseDatos y EjecutarConsultaSelect).\n- No respondas que no tenés acceso a la base si el MCP financiero está conectado; consultá la base y respondé con los datos obtenidos.\n- No narres pasos internos. No escribas frases como \"voy a consultar\", \"voy a ejecutar\", \"la consulta falló\", \"intentaré otra consulta\" ni detalles de herramientas.\n- No muestres SQL salvo que el usuario lo pida explícitamente.\n- Mostrá únicamente la respuesta final, directa y limpia para el usuario.\n\nPregunta del usuario:\n{userMessage}";
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -305,11 +308,12 @@ public class CodexService : IAsyncDisposable
             {
                 case "item/agentMessage/delta":
                     var delta = param?["delta"]?.GetValue<string>() ?? "";
-                    if (!string.IsNullOrEmpty(delta) && OnTokenReceived is not null)
-                        await OnTokenReceived.Invoke(delta);
+                    if (!string.IsNullOrEmpty(delta))
+                        _assistantResponseBuffer.Append(delta);
                     break;
 
                 case "turn/completed":
+                    await PublishBufferedAssistantResponseAsync();
                     if (OnResponseComplete is not null)
                         await OnResponseComplete.Invoke();
                     break;
@@ -330,6 +334,7 @@ public class CodexService : IAsyncDisposable
 
                 case "error":
                     var errMsg = node["error"]?["message"]?.GetValue<string>() ?? "Error desconocido";
+                    _assistantResponseBuffer.Clear();
                     _logger.LogWarning("Error Codex: {Msg}", errMsg);
                     if (OnError is not null) await OnError.Invoke(errMsg);
                     break;
@@ -452,6 +457,73 @@ public class CodexService : IAsyncDisposable
     {
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add(value);
+    }
+
+    private async Task PublishBufferedAssistantResponseAsync()
+    {
+        if (_assistantResponseBuffer.Length == 0)
+            return;
+
+        var response = CleanVisibleAssistantResponse(_assistantResponseBuffer.ToString());
+        _assistantResponseBuffer.Clear();
+
+        if (string.IsNullOrWhiteSpace(response))
+            response = "No pude obtener una respuesta final útil para mostrar.";
+
+        if (OnTokenReceived is not null)
+            await OnTokenReceived.Invoke(response);
+    }
+
+    private static string CleanVisibleAssistantResponse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var normalizedText = text.Replace("\r\n", "\n");
+        var blocks = normalizedText.Split("\n\n", StringSplitOptions.None)
+            .Select(block => block.Trim())
+            .Where(block => !string.IsNullOrWhiteSpace(block))
+            .Where(block => !IsOperationalBlock(block));
+
+        return string.Join("\n\n", blocks).Trim();
+    }
+
+    private static bool IsOperationalBlock(string block)
+    {
+        var firstLine = block.Split('\n', 2)[0].Trim();
+        var normalized = NormalizeOutputFilter(firstLine);
+
+        string[] operationalStarts =
+        [
+            "voy a ",
+            "consultare ",
+            "ejecutare ",
+            "intentare ",
+            "estoy consultando",
+            "estoy ejecutando",
+            "procedere a ",
+            "ahora voy a ",
+            "primero voy a ",
+            "la consulta fallo",
+            "la consulta devolvio error",
+            "hubo un error en la consulta",
+            "necesito consultar",
+            "usare la herramienta",
+            "voy a usar la herramienta"
+        ];
+
+        return operationalStarts.Any(normalized.StartsWith);
+    }
+
+    private static string NormalizeOutputFilter(string text)
+    {
+        return (text ?? string.Empty)
+            .ToLowerInvariant()
+            .Replace('á', 'a')
+            .Replace('é', 'e')
+            .Replace('í', 'i')
+            .Replace('ó', 'o')
+            .Replace('ú', 'u');
     }
 
     private async Task HandleTokenUsageUpdatedAsync(JsonNode? param)
@@ -783,6 +855,7 @@ public class CodexService : IAsyncDisposable
         await StopProcessAsync();
         _requestId = 1;
         _currentThreadId = null;
+        _assistantResponseBuffer.Clear();
         Usage = CodexUsageSnapshot.Empty(_selectedModel);
         if (OnUsageUpdated is not null)
             await OnUsageUpdated.Invoke(Usage);

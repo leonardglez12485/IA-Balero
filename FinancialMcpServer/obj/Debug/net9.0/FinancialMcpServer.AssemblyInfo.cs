@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("FinancialMcpServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6bcdec23a2770b08daab44b3a7315be350136be5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7cca103abd7e5602cfa57e8ff6c5058047efe418")]
 [assembly: System.Reflection.AssemblyProductAttribute("FinancialMcpServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("FinancialMcpServer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
