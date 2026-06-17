@@ -1,12 +1,12 @@
 using FinancialChat.Services;
-using System.Buffers.Text;
-using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var pathToExe = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
+var pathToExe = builder.Environment.ContentRootPath;
 Directory.SetCurrentDirectory(pathToExe);
-var configfile = pathToExe + Path.DirectorySeparatorChar + "config.json";
+var configfile = Path.Combine(pathToExe, "config.json");
+
+File.WriteAllLines(Path.Combine(pathToExe, "log.txt"), new[] { $"pathToExe={pathToExe}", $"configfile={configfile}" });
 
 builder.Configuration.AddJsonFile(configfile, optional: true, reloadOnChange: true);
 

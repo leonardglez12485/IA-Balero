@@ -14,6 +14,7 @@ public class CodexService : IAsyncDisposable
     private readonly IWebHostEnvironment _env;
     private readonly McpContextClient _mcpContextClient;
     private string _selectedModel;
+    private long _lastRawUsageTotalTokens;
 
     private Process? _codexProcess;
     private int _requestId = 1;
@@ -68,8 +69,8 @@ public class CodexService : IAsyncDisposable
         try
         {
             if (!await CheckAuthAsync()) return;
-            //await LaunchAppServerAsync();
-            _isStarted = true;
+            await LaunchAppServerAsync();
+            _isStarted = !string.IsNullOrWhiteSpace(_currentThreadId);
         }
         finally
         {
@@ -170,16 +171,30 @@ public class CodexService : IAsyncDisposable
 
         if (threadResp is not null)
         {
-            _currentThreadId = threadResp["result"]?["thread"]?["id"]?.GetValue<string>();
-            _logger.LogInformation("Thread creado: {Id}", _currentThreadId);
+            _currentThreadId = ExtractThreadId(threadResp);
+            if (string.IsNullOrWhiteSpace(_currentThreadId))
+                _logger.LogWarning("thread/start respondió sin threadId reconocible: {Response}", threadResp.ToJsonString());
+            else
+                _logger.LogInformation("Thread creado: {Id}", _currentThreadId);
         }
         else
         {
             _logger.LogWarning("thread/start no devolvió respuesta en tiempo");
         }
 
+        await WaitForThreadIdAsync(TimeSpan.FromSeconds(3));
+
         if (!await VerifyMcpServerAsync())
             return;
+
+        if (string.IsNullOrWhiteSpace(_currentThreadId))
+        {
+            const string message = "Codex no devolvió un thread activo durante el inicio.";
+            _logger.LogWarning(message);
+            if (OnError is not null)
+                await OnError.Invoke(message);
+            return;
+        }
 
         if (OnReady is not null)
             await OnReady.Invoke();
@@ -190,12 +205,16 @@ public class CodexService : IAsyncDisposable
     // ─────────────────────────────────────────────────────────────
     public async Task SendMessageAsync(string userMessage)
     {
-        if (!IsRunning)
+        if (!IsRunning || !_isStarted || string.IsNullOrWhiteSpace(_currentThreadId))
         {
-            await StartAsync();
+            if (IsRunning || _codexProcess is not null)
+                await RestartAsync();
+            else
+                await StartAsync();
+
             // Esperar hasta que esté listo o timeout
             var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            while (!_isStarted && !cts.Token.IsCancellationRequested)
+            while ((!_isStarted || string.IsNullOrWhiteSpace(_currentThreadId)) && !cts.Token.IsCancellationRequested)
                 await Task.Delay(200, cts.Token).ContinueWith(_ => { });
         }
 
@@ -297,7 +316,7 @@ public class CodexService : IAsyncDisposable
             }
 
             // Capturar threadId si viene en alguna respuesta
-            var resultThreadId = node["result"]?["thread"]?["id"]?.GetValue<string>();
+            var resultThreadId = ExtractThreadId(node);
             if (resultThreadId is not null && _currentThreadId is null)
             {
                 _currentThreadId = resultThreadId;
@@ -453,10 +472,77 @@ public class CodexService : IAsyncDisposable
         return messages;
     }
 
+    private static string? ExtractThreadId(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+
+        var direct = node["result"]?["thread"]?["id"]?.GetValue<string>()
+            ?? node["result"]?["id"]?.GetValue<string>()
+            ?? node["result"]?["threadId"]?.GetValue<string>()
+            ?? node["result"]?["thread_id"]?.GetValue<string>()
+            ?? node["params"]?["thread"]?["id"]?.GetValue<string>()
+            ?? node["params"]?["threadId"]?.GetValue<string>()
+            ?? node["params"]?["thread_id"]?.GetValue<string>()
+            ?? node["threadId"]?.GetValue<string>()
+            ?? node["thread_id"]?.GetValue<string>();
+
+        if (!string.IsNullOrWhiteSpace(direct))
+            return direct;
+
+        if (node is JsonObject obj)
+        {
+            foreach (var (key, value) in obj)
+            {
+                if ((string.Equals(key, "threadId", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(key, "thread_id", StringComparison.OrdinalIgnoreCase))
+                    && value is JsonValue jsonValue
+                    && jsonValue.TryGetValue<string>(out var threadId)
+                    && !string.IsNullOrWhiteSpace(threadId))
+                    return threadId;
+
+                if (string.Equals(key, "thread", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (value is JsonValue threadValue
+                        && threadValue.TryGetValue<string>(out var threadString)
+                        && !string.IsNullOrWhiteSpace(threadString))
+                        return threadString;
+
+                    var nestedId = value?["id"]?.GetValue<string>();
+                    if (!string.IsNullOrWhiteSpace(nestedId))
+                        return nestedId;
+                }
+
+                var nested = ExtractThreadId(value);
+                if (!string.IsNullOrWhiteSpace(nested))
+                    return nested;
+            }
+        }
+
+        if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                var nested = ExtractThreadId(item);
+                if (!string.IsNullOrWhiteSpace(nested))
+                    return nested;
+            }
+        }
+
+        return null;
+    }
+
     private static void AddConfigOverride(ProcessStartInfo startInfo, string value)
     {
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add(value);
+    }
+
+    private async Task WaitForThreadIdAsync(TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (string.IsNullOrWhiteSpace(_currentThreadId) && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(100);
     }
 
     private async Task PublishBufferedAssistantResponseAsync()
@@ -537,14 +623,27 @@ public class CodexService : IAsyncDisposable
         if (totalTokens <= 0)
             totalTokens = inputTokens + outputTokens + reasoningOutputTokens;
 
-        Usage = new CodexUsageSnapshot(
-            _selectedModel,
-            inputTokens,
-            cachedInputTokens,
-            outputTokens,
-            reasoningOutputTokens,
-            totalTokens,
-            EstimateCost(_selectedModel, inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens));
+        var eventCost = EstimateCost(_selectedModel, inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens);
+        var isCumulativeSnapshot = totalTokens >= _lastRawUsageTotalTokens && totalTokens >= Usage.TotalTokens;
+        _lastRawUsageTotalTokens = Math.Max(_lastRawUsageTotalTokens, totalTokens);
+
+        Usage = isCumulativeSnapshot
+            ? new CodexUsageSnapshot(
+                _selectedModel,
+                inputTokens,
+                cachedInputTokens,
+                outputTokens,
+                reasoningOutputTokens,
+                totalTokens,
+                eventCost)
+            : new CodexUsageSnapshot(
+                _selectedModel,
+                Usage.InputTokens + inputTokens,
+                Usage.CachedInputTokens + cachedInputTokens,
+                Usage.OutputTokens + outputTokens,
+                Usage.ReasoningOutputTokens + reasoningOutputTokens,
+                Usage.TotalTokens + totalTokens,
+                Usage.EstimatedCost + eventCost);
 
         if (OnUsageUpdated is not null)
             await OnUsageUpdated.Invoke(Usage);
@@ -669,7 +768,6 @@ public class CodexService : IAsyncDisposable
 
         try
         {
-            return true;
             var result = await RunCodexAsync(execPath, ["login", "--with-api-key", "-c", "forced_login_method=\"api\"", "-c", "cli_auth_credentials_store=\"file\""], apiKey);
             if (result.ExitCode == 0)
                 return true;
@@ -854,6 +952,7 @@ public class CodexService : IAsyncDisposable
         _requestId = 1;
         _currentThreadId = null;
         _assistantResponseBuffer.Clear();
+        _lastRawUsageTotalTokens = 0;
         Usage = CodexUsageSnapshot.Empty(_selectedModel);
         if (OnUsageUpdated is not null)
             await OnUsageUpdated.Invoke(Usage);

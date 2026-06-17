@@ -1,0 +1,2 @@
+pathToExe=C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat
+configfile=C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\config.json

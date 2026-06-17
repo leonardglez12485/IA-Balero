@@ -91,7 +91,6 @@ C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\.build-check\Fina
 C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\.build-check\FinancialChat.runtimeconfig.json
 C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\.build-check\FinancialChat.dll
 C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\.build-check\FinancialChat.pdb
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\compressed\zmdigpw3j7-{0}-cqifcquugb-cqifcquugb.gz
 C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\compressed\07fcfgcpp0-{0}-omiv9pylr8-omiv9pylr8.gz
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\.build-check\appsettings.json
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\.build-check\config.example.json
@@ -126,4 +125,4 @@ C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\FinancialChat.pdb
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\FinancialChat.genruntimeconfig.cache
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\ref\FinancialChat.dll
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\staticwebassets.upToDateCheck.txt
+C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\compressed\zmdigpw3j7-{0}-wvdvmderp8-wvdvmderp8.gz

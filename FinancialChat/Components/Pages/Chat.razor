@@ -6,28 +6,7 @@
 @implements IAsyncDisposable
 
 <div class="chat-container">
-
-    <header class="chat-header">
-        <div class="header-left">
-            <img src="logo.svg" class="logo" alt="Logo" aria-hidden="true" />
-            <div>
-                <h1>Asistente Financiero</h1>
-                <span class="status @StatusClass">● @StatusText</span>
-            </div>
-        </div>
-        <div class="header-actions">
-            <label class="model-selector">
-                <span>Modelo</span>
-                <select value="@SelectedModel" @onchange="HandleModelChanged" disabled="@IsSending">
-                    @foreach (var model in Codex.AvailableModels)
-                    {
-                        <option value="@model">@model</option>
-                    }
-                </select>
-            </label>
-            <button class="btn-clear" @onclick="ClearChat" title="Nueva conversación">Nueva</button>
-        </div>
-    </header>
+    <div class="top-status status @StatusClass">● @StatusText</div>
 
     <aside class="usage-panel" aria-label="Entorno de ejecución">
         <div class="usage-header">
@@ -50,7 +29,7 @@
             <strong class="usage-value usage-cost">@FormatMoney(_usage.EstimatedCost)</strong>
         </div>
         <div class="usage-divider"></div>
-        <div class="usage-section-title">Tokens</div>
+        <div class="usage-section-title">Uso de tokens</div>
         <div class="usage-row usage-row-small">
             <span class="usage-label">Entrada</span>
             <strong class="usage-value">@FormatNumber(_usage.InputTokens)</strong>
@@ -127,23 +106,36 @@
                     <button @onclick="() => ErrorMessage = string.Empty">Cerrar</button>
                 </div>
             }
-            <div class="input-row">
+            <div class="input-shell">
                 <textarea
                     @bind="UserInput"
                     @bind:event="oninput"
                     @onkeydown="HandleKeyDown"
-                    placeholder="Hacé tu pregunta financiera..."
+                    placeholder="Solicitar cambios de seguimiento"
                     rows="1"
                     disabled="@IsSending"
                     class="chat-textarea" />
-                <button
-                    class="btn-send @(IsSending ? "sending" : "")"
-                    @onclick="SendMessage"
-                    disabled="@(IsSending || string.IsNullOrWhiteSpace(UserInput))">
-                    @(IsSending ? "..." : "↑")
-                </button>
+                <div class="input-toolbar">
+                    <div class="input-tools">
+                        <button class="tool-button" type="button" title="Agregar">+</button>
+                    </div>
+                    <div class="input-meta">
+                        <select class="composer-model" value="@SelectedModel" @onchange="HandleModelChanged" disabled="@IsSending">
+                            @foreach (var model in Codex.AvailableModels)
+                            {
+                                <option value="@model">@model</option>
+                            }
+                        </select>
+                        <span class="mic-icon" aria-hidden="true">◌</span>
+                        <button
+                            class="btn-send @(IsSending ? "sending" : "")"
+                            @onclick="SendMessage"
+                            disabled="@(IsSending || string.IsNullOrWhiteSpace(UserInput))">
+                            @(IsSending ? "..." : "↑")
+                        </button>
+                    </div>
+                </div>
             </div>
-            <p class="input-hint">Enter para enviar · Shift+Enter para nueva línea</p>
         </footer>
     }
 </div>
