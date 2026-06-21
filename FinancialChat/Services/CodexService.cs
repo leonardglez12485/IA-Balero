@@ -248,6 +248,11 @@ public class CodexService : IAsyncDisposable
         await RestartAsync();
     }
 
+    public async Task StartNewConversationAsync()
+    {
+        await RestartAsync();
+    }
+
     private async Task<string> BuildUserInputAsync(string userMessage)
     {
         var sysPrompt = _config["Codex:SystemPrompt"];
@@ -477,21 +482,22 @@ public class CodexService : IAsyncDisposable
         if (node is null)
             return null;
 
-        var direct = node["result"]?["thread"]?["id"]?.GetValue<string>()
-            ?? node["result"]?["id"]?.GetValue<string>()
-            ?? node["result"]?["threadId"]?.GetValue<string>()
-            ?? node["result"]?["thread_id"]?.GetValue<string>()
-            ?? node["params"]?["thread"]?["id"]?.GetValue<string>()
-            ?? node["params"]?["threadId"]?.GetValue<string>()
-            ?? node["params"]?["thread_id"]?.GetValue<string>()
-            ?? node["threadId"]?.GetValue<string>()
-            ?? node["thread_id"]?.GetValue<string>();
-
-        if (!string.IsNullOrWhiteSpace(direct))
-            return direct;
-
         if (node is JsonObject obj)
         {
+            var direct =
+                TryGetString(obj, "threadId")
+                ?? TryGetString(obj, "thread_id")
+                ?? TryGetPathString(obj, "result", "thread", "id")
+                ?? TryGetPathString(obj, "result", "id")
+                ?? TryGetPathString(obj, "result", "threadId")
+                ?? TryGetPathString(obj, "result", "thread_id")
+                ?? TryGetPathString(obj, "params", "thread", "id")
+                ?? TryGetPathString(obj, "params", "threadId")
+                ?? TryGetPathString(obj, "params", "thread_id");
+
+            if (!string.IsNullOrWhiteSpace(direct))
+                return direct;
+
             foreach (var (key, value) in obj)
             {
                 if ((string.Equals(key, "threadId", StringComparison.OrdinalIgnoreCase)
@@ -508,7 +514,9 @@ public class CodexService : IAsyncDisposable
                         && !string.IsNullOrWhiteSpace(threadString))
                         return threadString;
 
-                    var nestedId = value?["id"]?.GetValue<string>();
+                    var nestedId = value is JsonObject threadObject
+                        ? TryGetString(threadObject, "id")
+                        : null;
                     if (!string.IsNullOrWhiteSpace(nestedId))
                         return nestedId;
                 }
@@ -530,6 +538,33 @@ public class CodexService : IAsyncDisposable
         }
 
         return null;
+    }
+
+    private static string? TryGetString(JsonObject obj, string key)
+    {
+        if (!obj.TryGetPropertyValue(key, out var value) || value is not JsonValue jsonValue)
+            return null;
+
+        return jsonValue.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text)
+            ? text
+            : null;
+    }
+
+    private static string? TryGetPathString(JsonObject obj, params string[] path)
+    {
+        JsonNode? current = obj;
+        foreach (var segment in path)
+        {
+            if (current is not JsonObject currentObject ||
+                !currentObject.TryGetPropertyValue(segment, out current))
+                return null;
+        }
+
+        return current is JsonValue jsonValue &&
+               jsonValue.TryGetValue<string>(out var text) &&
+               !string.IsNullOrWhiteSpace(text)
+            ? text
+            : null;
     }
 
     private static void AddConfigOverride(ProcessStartInfo startInfo, string value)

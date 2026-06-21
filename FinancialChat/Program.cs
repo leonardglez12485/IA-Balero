@@ -9,6 +9,7 @@ var configfile = Path.Combine(pathToExe, "config.json");
 File.WriteAllLines(Path.Combine(pathToExe, "log.txt"), new[] { $"pathToExe={pathToExe}", $"configfile={configfile}" });
 
 builder.Configuration.AddJsonFile(configfile, optional: true, reloadOnChange: true);
+ApplyCodexEnvironmentConfiguration(builder.Configuration);
 
 // ── Blazor Server ─────────────────────────────────────────────────────────────
 builder.Services.AddRazorComponents()
@@ -45,3 +46,28 @@ app.MapRazorComponents<FinancialChat.Components.App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static void ApplyCodexEnvironmentConfiguration(ConfigurationManager configuration)
+{
+    var ambiente = configuration["Codex:Ambiente"];
+    if (string.IsNullOrWhiteSpace(ambiente))
+        return;
+
+    var section = configuration.GetSection($"Codex:Ambientes:{ambiente.Trim()}");
+    if (!section.Exists())
+        return;
+
+    var overrides = new Dictionary<string, string?>();
+    AddOverride("ExecutablePath");
+    AddOverride("McpServerUrl");
+
+    if (overrides.Count > 0)
+        configuration.AddInMemoryCollection(overrides);
+
+    void AddOverride(string key)
+    {
+        var value = section[key];
+        if (!string.IsNullOrWhiteSpace(value))
+            overrides[$"Codex:{key}"] = value;
+    }
+}

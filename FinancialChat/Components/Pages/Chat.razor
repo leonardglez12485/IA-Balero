@@ -6,12 +6,17 @@
 @implements IAsyncDisposable
 
 <div class="chat-container">
-    <div class="top-status status @StatusClass">● @StatusText</div>
+    <button class="top-new-chat-button" type="button" title="Nuevo chat" aria-label="Nuevo chat" @onclick="StartNewConversation" disabled="@IsSending">
+        <svg class="top-new-chat-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 3H5.5A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h13a2.5 2.5 0 0 0 2.5-2.5V12" />
+            <path d="M18.4 2.8a1.9 1.9 0 0 1 2.8 2.8L11 15.8 7.5 16.5l.7-3.5 10.2-10.2Z" />
+        </svg>
+        <span>Nuevo chat</span>
+    </button>
 
     <aside class="usage-panel" aria-label="Entorno de ejecución">
         <div class="usage-header">
-            <span>Entorno</span>
-            <span class="usage-gear" aria-hidden="true">⚙</span>
+            <span class="panel-status status @StatusClass">● @StatusText</span>
         </div>
         <div class="usage-row usage-row-main">
             <span class="usage-icon">⚡</span>
@@ -44,8 +49,8 @@
     {
         <div class="auth-error">
             <span class="auth-icon">!</span>
-            <h2>OpenAI API key no configurada</h2>
-            <p>Definila en el archivo de configuración del backend y reiniciá la aplicación:</p>
+            <h2>No se pudo iniciar Codex</h2>
+            <p>@Codex.AuthError</p>
             <code>FinancialChat/config.json</code>
         </div>
     }
@@ -117,16 +122,31 @@
                     class="chat-textarea" />
                 <div class="input-toolbar">
                     <div class="input-tools">
-                        <button class="tool-button" type="button" title="Agregar">+</button>
+                        <button class="tool-button" type="button" title="Agregar adjunto" aria-label="Agregar adjunto">+</button>
                     </div>
                     <div class="input-meta">
-                        <select class="composer-model" value="@SelectedModel" @onchange="HandleModelChanged" disabled="@IsSending">
-                            @foreach (var model in Codex.AvailableModels)
+                        <div class="model-picker">
+                            <button class="composer-model" type="button" @onclick="ToggleModelMenu" disabled="@IsSending" aria-haspopup="listbox" aria-expanded="@IsModelMenuOpen">
+                                <span>@SelectedModel</span>
+                            </button>
+                            @if (IsModelMenuOpen)
                             {
-                                <option value="@model">@model</option>
+                                <div class="model-menu" role="listbox">
+                                    @foreach (var model in Codex.AvailableModels)
+                                    {
+                                        <button
+                                            type="button"
+                                            class="model-menu-item @(model == SelectedModel ? "selected" : "")"
+                                            role="option"
+                                            aria-selected="@(model == SelectedModel)"
+                                            @onclick="() => SelectModelAsync(model)">
+                                            @model
+                                        </button>
+                                    }
+                                </div>
                             }
-                        </select>
-                        <span class="mic-icon" aria-hidden="true">◌</span>
+                        </div>
+                        <span class="connection-dot @(IsConnected ? "online" : "offline")" aria-label="@StatusText" title="@StatusText"></span>
                         <button
                             class="btn-send @(IsSending ? "sending" : "")"
                             @onclick="SendMessage"
@@ -148,11 +168,13 @@
     private bool IsReady        { get; set; } = false;
     private string ErrorMessage { get; set; } = string.Empty;
     private string SelectedModel { get; set; } = string.Empty;
+    private bool IsModelMenuOpen { get; set; }
     private ChatMessage? _streamingMessage;
     private CodexUsageSnapshot _usage = CodexUsageSnapshot.Empty(string.Empty);
 
-    private string StatusClass => IsReady ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
-    private string StatusText  => IsReady ? "Conectado" : (string.IsNullOrEmpty(Codex.AuthError) ? "Conectando..." : "Sin autenticación");
+    private bool IsConnected => IsReady || (Codex.IsRunning && string.IsNullOrEmpty(Codex.AuthError));
+    private string StatusClass => IsConnected ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
+    private string StatusText  => IsConnected ? "Conectado" : (string.IsNullOrEmpty(Codex.AuthError) ? "Conectando..." : "Sin autenticación");
 
     private readonly string[] Suggestions =
     [
@@ -247,6 +269,12 @@
             await SendMessage();
     }
 
+    private void ToggleModelMenu()
+    {
+        if (!IsSending)
+            IsModelMenuOpen = !IsModelMenuOpen;
+    }
+
     private void ClearChat()
     {
         Messages.Clear();
@@ -256,17 +284,39 @@
         ErrorMessage = string.Empty;
     }
 
-    private async Task HandleModelChanged(ChangeEventArgs e)
+    private async Task StartNewConversation()
     {
-        var model = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(model) || model == SelectedModel)
+        if (IsSending)
             return;
 
-        SelectedModel = model;
         ClearChat();
         IsReady = false;
         IsSending = true;
-        IsThinking = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await Codex.StartNewConversationAsync();
+            _usage = Codex.Usage;
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    private async Task SelectModelAsync(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model) || model == SelectedModel)
+        {
+            IsModelMenuOpen = false;
+            return;
+        }
+
+        IsModelMenuOpen = false;
+        SelectedModel = model;
+        IsReady = false;
+        IsSending = true;
+        IsThinking = false;
         ErrorMessage = string.Empty;
         await Codex.ChangeModelAsync(model);
         _usage = Codex.Usage;
