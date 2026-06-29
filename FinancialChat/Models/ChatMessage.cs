@@ -22,4 +22,11 @@ public class ChatMessage
         Content = content,
         IsStreaming = isStreaming
     };
+
+    public static ChatMessage FromStored(MessageRole role, string content, DateTime timestamp) => new()
+    {
+        Role = role,
+        Content = content,
+        Timestamp = timestamp
+    };
 }

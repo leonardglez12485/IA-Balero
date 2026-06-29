@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("FinancialChat")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d63a6d002e981801c01143df955ec603c9d8939a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+78a0f5f69c51014c39b834f8c82fa5882313e035")]
 [assembly: System.Reflection.AssemblyProductAttribute("FinancialChat")]
 [assembly: System.Reflection.AssemblyTitleAttribute("FinancialChat")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

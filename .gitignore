@@ -98,6 +98,7 @@ ServiceFabricBackup/
 **/config.json
 !**/config.example.json
 **/.codex-backend/
+**/App_Data/
 **/*.pfx
 **/*.key
 **/*.pem

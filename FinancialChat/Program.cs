@@ -16,6 +16,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ConversationStore>();
 
 // ── CodexService como Singleton ───────────────────────────────────────────────
 // Singleton porque queremos UNA instancia de codex app-server corriendo

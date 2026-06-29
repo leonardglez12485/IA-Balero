@@ -31,6 +31,7 @@ public class CodexService : IAsyncDisposable
     public string McpStatus { get; private set; } = "No inicializado";
     public IReadOnlyList<string> AvailableModels { get; }
     public string CurrentModel => _selectedModel;
+    public string? CurrentThreadId => _currentThreadId;
     public CodexUsageSnapshot Usage { get; private set; } = CodexUsageSnapshot.Empty(DefaultModels[0]);
 
     public event Func<string, Task>? OnTokenReceived;
@@ -251,6 +252,26 @@ public class CodexService : IAsyncDisposable
     public async Task StartNewConversationAsync()
     {
         await RestartAsync();
+    }
+
+    public async Task UseConversationThreadAsync(string? threadId)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            await RestartAsync();
+            return;
+        }
+
+        if (!IsRunning)
+            await StartAsync();
+
+        if (IsRunning)
+        {
+            _currentThreadId = threadId;
+            _isStarted = true;
+            if (OnReady is not null)
+                await OnReady.Invoke();
+        }
     }
 
     private async Task<string> BuildUserInputAsync(string userMessage)

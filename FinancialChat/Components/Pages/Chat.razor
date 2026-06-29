@@ -2,6 +2,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Globalization
 @inject CodexService Codex
+@inject ConversationStore Conversations
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -13,6 +14,58 @@
         </svg>
         <span>Nuevo chat</span>
     </button>
+    <button class="top-search-button" type="button" title="Buscar" aria-label="Buscar">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <span>Buscar</span>
+    </button>
+
+    <aside class="conversation-sidebar" aria-label="Historial de conversaciones">
+        <div class="conversation-divider"></div>
+        @if (!ConversationItems.Any())
+        {
+            <div class="conversation-empty">Sin conversaciones</div>
+        }
+        else
+        {
+            @foreach (var conversation in ConversationItems)
+            {
+                <div class="conversation-entry @(conversation.Id == ActiveConversationId ? "active" : "")">
+                    <button
+                        type="button"
+                        class="conversation-item"
+                        title="@conversation.Title"
+                        @onclick="() => LoadConversation(conversation.Id)"
+                        disabled="@IsSending">
+                        <svg class="conversation-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M12 3H5.5A2.5 2.5 0 0 0 3 5.5v13A2.5 2.5 0 0 0 5.5 21h13a2.5 2.5 0 0 0 2.5-2.5V12" />
+                            <path d="M18.4 2.8a1.9 1.9 0 0 1 2.8 2.8L11 15.8 7.5 16.5l.7-3.5 10.2-10.2Z" />
+                        </svg>
+                        <span class="conversation-text">
+                            <span class="conversation-title">@conversation.Title</span>
+                            <span class="conversation-meta">@conversation.UpdatedAt.ToString("dd/MM HH:mm")</span>
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        class="conversation-menu-button"
+                        title="Opciones"
+                        aria-label="Opciones"
+                        @onclick:stopPropagation="true"
+                        @onclick="() => ToggleConversationMenu(conversation.Id)">
+                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                    </button>
+                    @if (OpenConversationMenuId == conversation.Id)
+                    {
+                        <div class="conversation-menu">
+                            <button type="button" class="conversation-menu-delete" @onclick="() => DeleteConversation(conversation.Id)">
+                                Borrar
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </aside>
 
     <aside class="usage-panel" aria-label="Entorno de ejecución">
         <div class="usage-header">
@@ -171,6 +224,9 @@
     private bool IsModelMenuOpen { get; set; }
     private ChatMessage? _streamingMessage;
     private CodexUsageSnapshot _usage = CodexUsageSnapshot.Empty(string.Empty);
+    private IReadOnlyList<ConversationListItem> ConversationItems { get; set; } = [];
+    private Guid? ActiveConversationId { get; set; }
+    private Guid? OpenConversationMenuId { get; set; }
 
     private bool IsConnected => IsReady || (Codex.IsRunning && string.IsNullOrEmpty(Codex.AuthError));
     private string StatusClass => IsConnected ? "online" : (string.IsNullOrEmpty(Codex.AuthError) ? "connecting" : "offline");
@@ -181,7 +237,8 @@
         "¿Cuál fue el margen neto del último trimestre?",
         "Comparar ingresos Q1 vs Q2 de este año",
         "¿Cuáles son los 5 gastos más altos del mes?",
-        "Mostrar evolución de ventas de los últimos 12 meses"
+        "Mostrar evolución de ventas de los últimos 12 meses",
+        "Mostrar un gráfico de barras con los ingresos por producto"
     ];
 
     protected override void OnInitialized()
@@ -195,9 +252,17 @@
         _usage = Codex.Usage;
     }
 
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadConversationListAsync();
+    }
+
     private async Task HandleReady()
     {
         IsReady = true;
+        if (ActiveConversationId is Guid conversationId)
+            await Conversations.UpdateThreadAsync(conversationId, Codex.CurrentThreadId);
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -205,6 +270,9 @@
     {
         _usage = usage;
         SelectedModel = usage.Model;
+        if (ActiveConversationId is Guid conversationId)
+            await Conversations.UpdateUsageAsync(conversationId, usage);
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -224,10 +292,16 @@
     private async Task HandleResponseComplete()
     {
         if (_streamingMessage is not null)
+        {
             _streamingMessage.IsStreaming = false;
+            if (ActiveConversationId is Guid conversationId)
+                await Conversations.AddMessageAsync(conversationId, MessageRole.Assistant, _streamingMessage.Content, SelectedModel);
+        }
+
         _streamingMessage = null;
         IsSending  = false;
         IsThinking = false;
+        await LoadConversationListAsync();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -236,7 +310,11 @@
         var assistantError = TryBuildAssistantError(error);
         if (!string.IsNullOrWhiteSpace(assistantError))
         {
-            Messages.Add(ChatMessage.FromAssistant(assistantError));
+            var errorMessage = ChatMessage.FromAssistant(assistantError);
+            Messages.Add(errorMessage);
+            if (ActiveConversationId is Guid conversationId)
+                await Conversations.AddMessageAsync(conversationId, MessageRole.Assistant, assistantError, SelectedModel);
+
             ErrorMessage = string.Empty;
         }
         else
@@ -278,6 +356,11 @@
         ErrorMessage = string.Empty;
 
         Messages.Add(ChatMessage.FromUser(text));
+        var conversation = await EnsureActiveConversationAsync();
+        await Conversations.AddMessageAsync(conversation.Id, MessageRole.User, text, SelectedModel);
+        await Conversations.UpdateThreadAsync(conversation.Id, Codex.CurrentThreadId);
+        await LoadConversationListAsync();
+
         StateHasChanged();
         await ScrollToBottomAsync();
         await Codex.SendMessageAsync(text);
@@ -321,13 +404,90 @@
         ErrorMessage = string.Empty;
         try
         {
+            ActiveConversationId = null;
             await Codex.StartNewConversationAsync();
             _usage = Codex.Usage;
+            await LoadConversationListAsync();
         }
         finally
         {
             IsSending = false;
         }
+    }
+
+    private async Task LoadConversation(Guid conversationId)
+    {
+        if (IsSending)
+            return;
+
+        OpenConversationMenuId = null;
+        var conversation = await Conversations.GetAsync(conversationId);
+        if (conversation is null)
+            return;
+
+        ClearChat();
+        ActiveConversationId = conversation.Id;
+        SelectedModel = string.IsNullOrWhiteSpace(conversation.LastModel) ? SelectedModel : conversation.LastModel;
+        _usage = new CodexUsageSnapshot(SelectedModel, 0, 0, 0, 0, conversation.TotalTokens, conversation.EstimatedCost);
+        Messages = conversation.Messages
+            .OrderBy(m => m.CreatedAt)
+            .Select(m => ChatMessage.FromStored(m.Role, m.Content, m.CreatedAt))
+            .ToList();
+
+        IsReady = false;
+        IsSending = true;
+        try
+        {
+            await Codex.UseConversationThreadAsync(conversation.CodexThreadId);
+            await Conversations.UpdateThreadAsync(conversation.Id, Codex.CurrentThreadId);
+        }
+        finally
+        {
+            IsSending = false;
+        }
+
+        await LoadConversationListAsync();
+        await InvokeAsync(StateHasChanged);
+        await ScrollToBottomAsync();
+    }
+
+    private async Task<StoredConversation> EnsureActiveConversationAsync()
+    {
+        if (ActiveConversationId is Guid conversationId)
+        {
+            var current = await Conversations.GetAsync(conversationId);
+            if (current is not null)
+                return current;
+        }
+
+        var created = await Conversations.CreateAsync(SelectedModel);
+        ActiveConversationId = created.Id;
+        return created;
+    }
+
+    private async Task LoadConversationListAsync()
+    {
+        ConversationItems = await Conversations.ListAsync();
+    }
+
+    private void ToggleConversationMenu(Guid conversationId)
+    {
+        OpenConversationMenuId = OpenConversationMenuId == conversationId ? null : conversationId;
+    }
+
+    private async Task DeleteConversation(Guid conversationId)
+    {
+        OpenConversationMenuId = null;
+        await Conversations.DeleteAsync(conversationId);
+
+        if (ActiveConversationId == conversationId)
+        {
+            ActiveConversationId = null;
+            ClearChat();
+            _usage = CodexUsageSnapshot.Empty(SelectedModel);
+        }
+
+        await LoadConversationListAsync();
     }
 
     private async Task SelectModelAsync(string model)
