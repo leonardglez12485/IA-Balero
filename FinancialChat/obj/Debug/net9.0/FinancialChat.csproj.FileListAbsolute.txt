@@ -125,4 +125,4 @@ C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\FinancialChat.pdb
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\FinancialChat.genruntimeconfig.cache
 C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\7f681dcbf175ab7c\FinancialChat\obj\Debug\net9.0\ref\FinancialChat.dll
-C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\compressed\zmdigpw3j7-{0}-8ns2uaja51-8ns2uaja51.gz
+C:\Users\Leonardo\source\repos\FinancialSolution\FinancialChat\obj\Debug\net9.0\compressed\zmdigpw3j7-{0}-3exai5dqvv-3exai5dqvv.gz

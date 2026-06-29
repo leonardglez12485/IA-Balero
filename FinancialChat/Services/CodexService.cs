@@ -328,6 +328,12 @@ public class CodexService : IAsyncDisposable
                 _logger.LogInformation("ThreadId capturado: {Id}", _currentThreadId);
             }
 
+            if (node["error"] is not null && string.IsNullOrWhiteSpace(method))
+            {
+                await PublishCodexErrorAsync(node, jsonLine);
+                return;
+            }
+
             switch (method)
             {
                 case "item/agentMessage/delta":
@@ -357,10 +363,7 @@ public class CodexService : IAsyncDisposable
                     break;
 
                 case "error":
-                    var errMsg = node["error"]?["message"]?.GetValue<string>() ?? "Error desconocido";
-                    _assistantResponseBuffer.Clear();
-                    _logger.LogWarning("Error Codex: {Msg}", errMsg);
-                    if (OnError is not null) await OnError.Invoke(errMsg);
+                    await PublishCodexErrorAsync(node, jsonLine);
                     break;
 
                 default:
@@ -372,6 +375,56 @@ public class CodexService : IAsyncDisposable
         {
             _logger.LogWarning(ex, "JSON no parseable: {L}", jsonLine);
         }
+    }
+
+    private async Task PublishCodexErrorAsync(JsonNode node, string rawJson)
+    {
+        var errMsg = ExtractCodexErrorMessage(node);
+        _assistantResponseBuffer.Clear();
+        _logger.LogWarning("Error Codex: {Msg}. Payload={Payload}", errMsg, rawJson);
+
+        if (OnError is not null)
+            await OnError.Invoke(errMsg);
+    }
+
+    private static string ExtractCodexErrorMessage(JsonNode node)
+    {
+        return ReadStringPath(node, "error", "message")
+            ?? ReadStringPath(node, "error", "data", "message")
+            ?? ReadStringPath(node, "params", "message")
+            ?? ReadStringPath(node, "params", "error", "message")
+            ?? ReadStringPath(node, "params", "error")
+            ?? ReadStringPath(node, "message")
+            ?? ReadStringPath(node, "error")
+            ?? "Codex devolvió un error sin detalle. Revisá la consola del backend para ver el payload completo.";
+    }
+
+    private static string? ReadStringPath(JsonNode? node, params string[] path)
+    {
+        foreach (var segment in path)
+        {
+            if (node is not JsonObject obj || !obj.TryGetPropertyValue(segment, out node))
+                return null;
+        }
+
+        if (node is null)
+            return null;
+
+        if (node is JsonValue value)
+        {
+            try
+            {
+                if (value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+                    return text;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        var json = node.ToJsonString();
+        return string.IsNullOrWhiteSpace(json) || json == "null" ? null : json;
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -19,17 +19,17 @@
             <span class="panel-status status @StatusClass">● @StatusText</span>
         </div>
         <div class="usage-row usage-row-main">
-            <span class="usage-icon">⚡</span>
+            <span class="usage-icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span>
             <span class="usage-label">Tokens</span>
             <strong class="usage-value">@FormatNumber(_usage.TotalTokens)</strong>
         </div>
         <div class="usage-row">
-            <span class="usage-icon">⊙</span>
+            <span class="usage-icon"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>
             <span class="usage-label">Modelo</span>
             <strong class="usage-value">@SelectedModel</strong>
         </div>
         <div class="usage-row">
-            <span class="usage-icon">◈</span>
+            <span class="usage-icon"><i class="fa-solid fa-wallet" aria-hidden="true"></i></span>
             <span class="usage-label">Consumo</span>
             <strong class="usage-value usage-cost">@FormatMoney(_usage.EstimatedCost)</strong>
         </div>
@@ -116,7 +116,7 @@
                     @bind="UserInput"
                     @bind:event="oninput"
                     @onkeydown="HandleKeyDown"
-                    placeholder="Solicitar cambios de seguimiento"
+                    placeholder="Formula tu pregunta"
                     rows="1"
                     disabled="@IsSending"
                     class="chat-textarea" />
@@ -233,12 +233,38 @@
 
     private async Task HandleError(string error)
     {
-        ErrorMessage      = error;
+        var assistantError = TryBuildAssistantError(error);
+        if (!string.IsNullOrWhiteSpace(assistantError))
+        {
+            Messages.Add(ChatMessage.FromAssistant(assistantError));
+            ErrorMessage = string.Empty;
+        }
+        else
+        {
+            ErrorMessage = error;
+        }
+
         IsSending         = false;
         IsThinking        = false;
         IsReady           = false;
         _streamingMessage = null;
         await InvokeAsync(StateHasChanged);
+        await ScrollToBottomAsync();
+    }
+
+    private static string? TryBuildAssistantError(string error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return null;
+
+        if (error.Contains("quota exceeded", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("billing", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase))
+        {
+            return "No puedo generar una respuesta en este momento porque se excedió la cuota o el saldo disponible de la cuenta de OpenAI. Verificá el plan, la facturación o el límite de consumo configurado y luego intentá nuevamente.";
+        }
+
+        return null;
     }
 
     private async Task SendMessage()

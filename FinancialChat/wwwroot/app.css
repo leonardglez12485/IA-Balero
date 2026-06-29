@@ -797,14 +797,15 @@ body,
   padding: 0 14px 0 12px;
   border: 0;
   border-radius: 8px;
-  background: rgba(19, 45, 64, .92);
+  background: transparent;
   color: var(--codex-text);
   font-size: 14px;
   cursor: pointer;
 }
 
 .top-new-chat-button:hover:not(:disabled) {
-  background: rgba(24, 55, 77, .98);
+  background: transparent;
+  color: #ffffff;
 }
 
 .top-new-chat-button:disabled {
@@ -831,7 +832,7 @@ body,
   padding: 18px 17px 16px;
   border-radius: 18px;
   background: rgba(19, 45, 64, .96);
-  border: 1px solid rgba(190, 215, 236, .11);
+  border: 0;
   box-shadow: none;
   backdrop-filter: none;
 }
@@ -868,9 +869,13 @@ body,
 .usage-icon {
   width: 18px;
   height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: #b8c7d4;
+  font-size: 14px;
   box-shadow: none;
 }
 
@@ -963,7 +968,7 @@ body,
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(19, 45, 64, .72);
-  border: 1px solid rgba(190, 215, 236, .08);
+  border: 0;
   color: var(--codex-text);
   font-size: 13px;
   text-align: left;
@@ -971,7 +976,6 @@ body,
 
 .suggestion-chip:hover {
   background: rgba(19, 45, 64, .9);
-  border-color: rgba(190, 215, 236, .16);
 }
 
 .message {
@@ -1121,7 +1125,7 @@ body,
   border-radius: 999px !important;
   outline: none !important;
   box-shadow: none !important;
-  background-color: rgba(24, 55, 77, .92) !important;
+  background-color: rgba(19, 45, 64, .98) !important;
   color: var(--codex-text) !important;
   cursor: pointer;
   text-align: left;
